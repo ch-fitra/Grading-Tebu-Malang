@@ -1,0 +1,31 @@
+{
+  "name": "sugarcane-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "apps/desktop",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "dev": "npm run dev:web",
+    "dev:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-all.ps1",
+    "dev:web": "concurrently -n api,web,ai -c green,cyan,magenta \"npm run dev -w @sugarcane/api\" \"npm run dev -w @sugarcane/web\" \"npm run dev:ai\"",
+    "dev:api": "npm run dev -w @sugarcane/api",
+    "dev:frontend": "npm run dev -w @sugarcane/web",
+    "dev:ai": "python -m uvicorn main:app --app-dir apps/ai-service --host 127.0.0.1 --port 8010 --reload",
+    "dev:desktop": "npm run dev -w @sugarcane/desktop",
+    "build": "npm run build -w @sugarcane/contracts && npm run build -w @sugarcane/api && npm run build -w @sugarcane/web && npm run build -w @sugarcane/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run db:migrate -w @sugarcane/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

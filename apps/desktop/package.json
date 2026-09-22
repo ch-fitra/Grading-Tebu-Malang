@@ -1,0 +1,35 @@
+{
+  "name": "@sugarcane/desktop",
+  "version": "0.1.0",
+  "description": "Electron desktop client for the Tebu AI platform",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "npm run build -w @sugarcane/web && npm run build && node scripts/ensure-electron.cjs && set ELECTRON_RUN_AS_NODE=&& electron dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "npm run build -w @sugarcane/web && npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "44.4.1",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "id.xoora.tebuai",
+    "productName": "TebuAI",
+    "files": ["dist/**/*"],
+    "npmRebuild": false,
+    "extraResources": [
+      { "from": "../web/dist", "to": "renderer", "filter": ["**/*"] }
+    ],
+    "win": {
+      "signAndEditExecutable": false
+    },
+    "directories": {
+      "output": "release"
+    }
+  }
+}

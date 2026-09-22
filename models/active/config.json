@@ -1,0 +1,8 @@
+{
+  "name": "Tebu Segmentation V1",
+  "version": "1.0.0",
+  "type": "segmentation",
+  "input_size": 640,
+  "classes": ["daun", "pucuk", "sampah"],
+  "threshold": 0.5
+}
