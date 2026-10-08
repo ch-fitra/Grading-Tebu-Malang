@@ -11,13 +11,18 @@ function Require-Success([string]$label) {
 
 Set-Location $root
 
+# Restore packages before Vite and the desktop build try to resolve imports.
+& npm.cmd install --ignore-scripts
+Require-Success "Instalasi dependensi"
+
 Write-Host "[1/3] Memeriksa PostgreSQL..." -ForegroundColor Cyan
 $postgresRunning = $null -ne (Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
 if (-not $postgresRunning) {
   & docker compose up -d postgres
   Require-Success "PostgreSQL"
   for ($attempt = 1; $attempt -le 30; $attempt++) {
-    $health = (& docker inspect --format '{{.State.Health.Status}}' sugarcane-postgres 2>$null).Trim()
+    $health = [string](& docker inspect --format '{{.State.Health.Status}}' sugarcane-postgres 2>$null)
+    $health = $health.Trim()
     if ($health -eq "healthy") { $postgresRunning = $true; break }
     Start-Sleep -Seconds 2
   }
@@ -34,8 +39,7 @@ $env:API_HOST = "0.0.0.0"
 $flutter = Join-Path $root ".toolchains\flutter\bin\flutter.bat"
 if (-not (Test-Path $flutter)) {
   $flutterCommand = Get-Command flutter -ErrorAction SilentlyContinue
-  if ($null -eq $flutterCommand) { throw "Flutter tidak ditemukan. Instal Flutter atau sediakan .toolchains\\flutter." }
-  $flutter = $flutterCommand.Source
+  $flutter = if ($null -eq $flutterCommand) { $null } else { $flutterCommand.Source }
 }
 
 if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) {
@@ -50,7 +54,9 @@ if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) {
 
 $device = $null
 try {
-  $device = (& $flutter devices --machine 2>$null | ConvertFrom-Json | Where-Object { $_.targetPlatform -eq "android" } | Select-Object -First 1).id
+  if ($flutter) {
+    $device = (& $flutter devices --machine 2>$null | ConvertFrom-Json | Where-Object { $_.targetPlatform -match '^android' } | Select-Object -First 1).id
+  }
 } catch { $device = $null }
 
 $commands = @(
@@ -63,6 +69,7 @@ $names = "api,web,ai,desktop"
 $colors = "green,cyan,magenta,yellow"
 
 if ($device) {
+  if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) { throw "Alamat LAN tidak ditemukan. Jalankan dengan -MobileApiUrl http://IP-KOMPUTER:4110." }
   $mobileCommand = "cd /d `"$root\apps\mobile`" && `"$flutter`" run -d $device --dart-define=API_BASE_URL=$MobileApiUrl"
   $commands += $mobileCommand
   $names += ",mobile"

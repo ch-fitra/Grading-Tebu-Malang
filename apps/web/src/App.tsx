@@ -6,7 +6,7 @@ import { DashboardPage } from "./components/DashboardPage";
 import { HistoryPage } from "./components/HistoryPage";
 import { PoweredByWatermark } from "./components/shared/PoweredByWatermark";
 import { AccessManagement } from "./components/AccessManagement";
-const trangkilLogoSvg = "/logo-pg-trangkil.svg";
+const trangkilLogoSvg = "./logo-pg-trangkil.svg";
 
 const websocketUrl = window.sugarcaneDesktop?.websocketUrl ?? import.meta.env.VITE_WS_URL ?? "ws://127.0.0.1:4110/ws";
 
@@ -163,9 +163,9 @@ export default function App() {
         </div>
       </aside>
       <main className={tab === "dashboard" ? "dashboardMainFixed" : ""}>
-        {tab === "dashboard" && <DashboardPage />}
-        {tab === "history" && <HistoryPage />}
-        {tab === "access" && <AccessManagement />}
+        {tab === "dashboard" && permissions.includes("dashboard.read") && <DashboardPage />}
+        {tab === "history" && permissions.includes("history.read") && <HistoryPage />}
+        {tab === "access" && permissions.includes("user.read") && <AccessManagement />}
       </main>
     </div>
   );

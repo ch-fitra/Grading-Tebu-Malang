@@ -53,22 +53,28 @@ export function AccessManagement() {
   const [error, setError] = useState("");
   const [successInfo, setSuccessInfo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const canWriteUsers = session?.user.permissions?.includes("user.write") ?? false;
   const canWriteRoles = session?.user.permissions?.includes("role.write") ?? false;
   const manageableRoles = roles.filter(r => isDeveloper || !r.permissions.some(p => restrictedForAdmin.includes(p)));
 
   async function reload() {
-    const [roleRows, userRows] = await Promise.all([
-      api<Role[]>("/api/roles").catch(() => []),
-      api<User[]>("/api/users").catch(() => [])
-    ]);
-    setRoles(roleRows);
-    setUsers(userRows);
+    setLoading(true);
+    try {
+      const [roleRows, userRows] = await Promise.all([
+        session?.user.permissions.includes("role.read") ? api<Role[]>("/api/roles") : Promise.resolve([]),
+        api<User[]>("/api/users")
+      ]);
+      setRoles(roleRows);
+      setUsers(userRows);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    reload().catch(() => setError("Gagal memuat pengguna dan role."));
+    reload().catch(e => setError(e instanceof Error ? e.message : "Gagal memuat pengguna dan role."));
   }, []);
 
   async function request(action: () => Promise<unknown>) {
@@ -265,7 +271,7 @@ export function AccessManagement() {
                 <span>DAFTAR PENGGUNA RESMI PABRIK GULA</span>
               </div>
               <span className="accessCardSubtitle">
-                Dua akun resmi aktif untuk operasional penimbangan, penilaian mutu conveyor, dan otorisasi 2FA
+                Akun pengguna untuk operasional penimbangan, penilaian mutu conveyor, dan otorisasi
               </span>
             </div>
             <div className="accessCardMetaBadge">
@@ -289,7 +295,7 @@ export function AccessManagement() {
                 {users.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="accessEmptyCell">
-                      Memuat data pengguna resmi pabrik...
+                      {loading ? "Memuat data pengguna resmi pabrik..." : "Belum ada pengguna yang dapat ditampilkan."}
                     </td>
                   </tr>
                 ) : (

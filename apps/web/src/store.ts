@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AiModel, CameraRow, DeletionRequest, InferenceResult, SystemStatus, TruckInspectionSession } from "./types";
-import { api } from "./utils/api";
+import { api, ApiError } from "./utils/api";
 
 type Session = { token: string; user: { id: number; username: string; role: string; permissions: string[] } };
 export type AppState = {
@@ -56,16 +56,13 @@ function readSession(): Session | null {
 // Old browser-only inspections remain visible. New inspections always use PostgreSQL.
 function legacySessions(): TruckInspectionSession[] {
   try {
-    if (localStorage.getItem("tebu-legacy-cleared-v30sept") !== "true") {
-      localStorage.removeItem("tebu-truck-sessions");
-      localStorage.setItem("tebu-legacy-cleared-v30sept", "true");
-      return [];
-    }
     const value: unknown = JSON.parse(localStorage.getItem("tebu-truck-sessions") ?? "[]");
     return Array.isArray(value) ? value.filter((item): item is TruckInspectionSession => typeof item?.id === "string" && item.id.startsWith("session_")) : [];
   } catch { return []; }
 }
 function saveLegacy(sessions: TruckInspectionSession[]) { localStorage.setItem("tebu-truck-sessions", JSON.stringify(sessions)); }
+
+let refreshVersion = 0;
 
 export const useAppStore = create<AppState>((set, get) => ({
   session: readSession(), latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [],
@@ -84,23 +81,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!current) return;
     try {
       const user = await api<Session["user"]>("/api/auth/me");
+      if (get().session?.token !== current.token) return;
       const session = { ...current, user };
       localStorage.setItem("tebu-session", JSON.stringify(session));
       set({ session });
-    } catch { get().logout(); }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401 && get().session?.token === current.token) get().logout();
+    }
   },
   refresh: async () => {
-    const permissions = get().session?.user.permissions ?? [];
+    const current = get().session;
+    if (!current) return;
+    const version = ++refreshVersion;
+    const previous = get();
+    const failed = <T,>(error: unknown, fallback: T): T => {
+      if (error instanceof ApiError && error.status === 401 && get().session?.token === current.token) get().logout();
+      return fallback;
+    };
+    const permissions = current.user.permissions;
     const can = (permission: string) => permissions.includes(permission);
     const [latest, history, cameras, models, status, backendTrucks, deletionRequests] = await Promise.all([
-      can("dashboard.read") ? api<InferenceResult | null>("/api/inference/latest").catch(() => null) : Promise.resolve(null),
-      can("history.read") ? api<InferenceResult[]>("/api/inference/history").catch(() => []) : Promise.resolve([]),
-      can("camera.read") ? api<CameraRow[]>("/api/cameras").catch(() => []) : Promise.resolve([]),
-      can("model.read") ? api<AiModel[]>("/api/models").catch(() => []) : Promise.resolve([]),
-      can("dashboard.read") ? api<SystemStatus>("/api/system/status").catch(() => null) : Promise.resolve(null),
-      can("history.read") ? api<TruckInspectionSession[]>("/api/truck-inspections").catch(() => []) : Promise.resolve([]),
-      can("dashboard.read") ? api<DeletionRequest[]>("/api/deletion-requests").catch(() => []) : Promise.resolve([])
+      can("dashboard.read") ? api<InferenceResult | null>("/api/inference/latest").catch(error => failed(error, previous.latest)) : Promise.resolve(null),
+      can("history.read") ? api<InferenceResult[]>("/api/inference/history").catch(error => failed(error, previous.history)) : Promise.resolve([]),
+      can("camera.read") ? api<CameraRow[]>("/api/cameras").catch(error => failed(error, previous.cameras)) : Promise.resolve([]),
+      can("model.read") ? api<AiModel[]>("/api/models").catch(error => failed(error, previous.models)) : Promise.resolve([]),
+      can("dashboard.read") ? api<SystemStatus>("/api/system/status").catch(error => failed(error, previous.status)) : Promise.resolve(null),
+      can("history.read") ? api<TruckInspectionSession[]>("/api/truck-inspections").catch(error => failed(error, previous.truckSessions.filter(item => !item.id.startsWith("session_")))) : Promise.resolve([]),
+      can("dashboard.read") ? api<DeletionRequest[]>("/api/deletion-requests").catch(error => failed(error, previous.deletionRequests)) : Promise.resolve([])
     ]);
+    if (get().session?.token !== current.token || version !== refreshVersion) return;
     const trucks = [...(backendTrucks ?? []), ...legacySessions()];
     set({
       latest,
@@ -176,6 +185,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const backendMatches = matches.filter(m => !m.id.startsWith("session_"));
     const legacyMatches = matches.filter(m => m.id.startsWith("session_"));
 
+    let count = 0;
+    if (backendMatches.length > 0) {
+      const res = await api<{ count: number }>("/api/truck-inspections/sync-tapping", {
+        method: "POST",
+        body: JSON.stringify({ matches: backendMatches })
+      });
+      count += res.count;
+    }
     if (legacyMatches.length > 0) {
       const updated = legacySessions().map(s => {
         const match = legacyMatches.find(m => m.id === s.id);
@@ -190,16 +207,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
       });
       saveLegacy(updated);
+      count += legacySessions().filter(session => legacyMatches.some(match => match.id === session.id)).length;
     }
 
-    let count = legacyMatches.length;
-    if (backendMatches.length > 0) {
-      const res = await api<{ count: number }>("/api/truck-inspections/sync-tapping", {
-        method: "POST",
-        body: JSON.stringify({ matches: backendMatches })
-      });
-      count += res.count;
-    }
     await get().refresh();
     return count;
   }

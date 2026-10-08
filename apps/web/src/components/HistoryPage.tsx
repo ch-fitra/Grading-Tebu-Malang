@@ -36,45 +36,9 @@ import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
 import { TRANGKIL_GRADES, type TrangkilGradeCode } from "./DashboardPage";
 import { backendUrl } from "../utils/api";
-import type { TruckInspectionSession, InferenceResult, Grade, CameraRow } from "../types";
+import type { TruckInspectionSession, InferenceResult, Grade } from "../types";
 
-export interface MbsStationInfo {
-  mbsNum: number;
-  label: string;
-  subLabel: string;
-  isPrimaryLive: boolean;
-  cameraId?: number;
-}
-
-export function resolveMbsStation(idOrLine?: number, cameras?: CameraRow[]): MbsStationInfo {
-  if (!idOrLine) {
-    return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: 2 };
-  }
-  const cam = cameras?.find(c => c.id === idOrLine);
-  if (cam) {
-    const name = cam.name.toLowerCase();
-    if (name.includes("mbs 5") || name.includes("wisenet")) {
-      return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: cam.id };
-    }
-    if (name.includes("mbs 1") || name.includes("kebon agung")) {
-      return { mbsNum: 1, label: "MBS 1", subLabel: "PG Kebon Agung", isPrimaryLive: false, cameraId: cam.id };
-    }
-    const match = cam.name.match(/MBS\s*(\d+)/i);
-    if (match) {
-      const num = Number(match[1]);
-      return { mbsNum: num, label: `MBS ${num}`, subLabel: cam.location || `Meja ${num}`, isPrimaryLive: num === 5, cameraId: cam.id };
-    }
-  }
-
-  // Fallback direct mapping for PT Trangkil & PG Kebon Agung
-  if (idOrLine === 2 || idOrLine === 5) {
-    return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: 2 };
-  }
-  if (idOrLine === 1) {
-    return { mbsNum: 1, label: "MBS 1", subLabel: "PG Kebon Agung", isPrimaryLive: false, cameraId: 1 };
-  }
-  return { mbsNum: idOrLine, label: `MBS ${idOrLine}`, subLabel: `Meja ${idOrLine}`, isPrimaryLive: false };
-}
+import { resolveMbsStation } from "../utils/stations";
 
 function normalizeGrade(g?: string): string {
   if (!g) return "M";
@@ -126,7 +90,7 @@ export function HistoryPage() {
   // Search & Filtering States
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDateFilter, setSelectedDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
-  const [selectedLineFilter, setSelectedLineFilter] = useState<number | "all">(5);
+  const [selectedLineFilter, setSelectedLineFilter] = useState<number | "all">("all");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string | "all">("all");
 
   // Clock ticker & theme
@@ -159,6 +123,7 @@ export function HistoryPage() {
     const text = `${c.name} ${c.location}`.toLowerCase();
     return userFactory === "kebonagung" ? (text.includes("kebon agung") || text.includes("malang")) : text.includes("trangkil");
   });
+  const availableLines = new Set(visibleCameras.map(camera => resolveMbsStation(camera.id, cameras).mbsNum));
   const allowedCameraIds = new Set(visibleCameras.map(c => c.id));
   const visibleHistory = history.filter(h => !userFactory || allowedCameraIds.has(h.cameraId));
   const visibleTrucks = truckSessions.filter(t => !userFactory || allowedCameraIds.has(t.line));
@@ -203,7 +168,7 @@ export function HistoryPage() {
       // Line filter with resolveMbsStation mapping
       if (selectedLineFilter !== "all") {
         const mbsNum = resolveMbsStation(truck.line, cameras).mbsNum;
-        if (mbsNum !== selectedLineFilter && truck.line !== selectedLineFilter) return false;
+        if (mbsNum !== selectedLineFilter) return false;
       }
       // Status filter
       if (selectedStatusFilter !== "all" && truck.status !== selectedStatusFilter) {
@@ -229,14 +194,19 @@ export function HistoryPage() {
           if (now - itemTime > 30 * 86400000) return false;
         }
       }
+      if (searchQuery.trim()) {
+        const truck = visibleTrucks.find(truck => truck.captureIds?.includes(item.id));
+        const text = [item.id, item.grade, item.timestamp, cameras.find(camera => camera.id === item.cameraId)?.name, truck?.truckCode, truck?.plateNumber, truck?.driverName].join(" ").toLowerCase();
+        if (!text.includes(searchQuery.trim().toLowerCase())) return false;
+      }
       // Line filter with resolveMbsStation mapping
       if (selectedLineFilter !== "all") {
         const mbsNum = resolveMbsStation(item.cameraId, cameras).mbsNum;
-        if (mbsNum !== selectedLineFilter && item.cameraId !== selectedLineFilter) return false;
+        if (mbsNum !== selectedLineFilter) return false;
       }
       return true;
     });
-  }, [visibleHistory, selectedDateFilter, selectedLineFilter, cameras]);
+  }, [visibleHistory, visibleTrucks, searchQuery, selectedDateFilter, selectedLineFilter, cameras]);
 
   // Summary KPIs based on filtered or active records
   const totalCyclesCount = filteredTrucks.length;
@@ -244,9 +214,9 @@ export function HistoryPage() {
   const totalCapturesCount = filteredHistory.length;
 
   const averageConfidence = filteredHistory.length > 0
-    ? `${Math.round((filteredHistory.reduce((sum, row) => sum + (row.confidence || 0.88), 0) / filteredHistory.length) * 100)}%`
+    ? `${Math.round((filteredHistory.reduce((sum, row) => sum + (row.confidence ?? 0), 0) / filteredHistory.length) * 100)}%`
     : filteredTrucks.length > 0
-    ? `${Math.round((filteredTrucks.reduce((sum, row) => sum + (row.averageConfidence || 0.88), 0) / filteredTrucks.length) * 100)}%`
+    ? `${Math.round((filteredTrucks.reduce((sum, row) => sum + (row.averageConfidence ?? 0), 0) / filteredTrucks.length) * 100)}%`
     : "—";
 
   const averageImpurity = filteredHistory.length > 0
@@ -258,21 +228,21 @@ export function HistoryPage() {
   const hasActiveFilters = Boolean(
     searchQuery.trim() ||
     selectedDateFilter !== "all" ||
-    (selectedLineFilter !== 5 && selectedLineFilter !== "all") ||
+    (selectedLineFilter !== "all") ||
     selectedStatusFilter !== "all"
   );
 
   const activeFiltersCount = [
     Boolean(searchQuery.trim()),
     selectedDateFilter !== "all",
-    selectedLineFilter !== 5 && selectedLineFilter !== "all",
+    selectedLineFilter !== "all",
     selectedStatusFilter !== "all"
   ].filter(Boolean).length;
 
   const handleResetFilters = () => {
     setSearchQuery("");
     setSelectedDateFilter("all");
-    setSelectedLineFilter(5);
+    setSelectedLineFilter("all");
     setSelectedStatusFilter("all");
   };
 
@@ -299,7 +269,7 @@ export function HistoryPage() {
         curConfig.tol,
         curConfig.rafaksi,
         curConfig.status,
-        Math.round((row.confidence || 0.88) * 100)
+        Math.round((row.confidence ?? 0) * 100)
       ];
     });
     downloadCsv(`tebu-frame-log-${Date.now()}.csv`, [header, ...body]);
@@ -335,7 +305,7 @@ export function HistoryPage() {
         row.totalCaptures,
         `${row.averageImpurity.toFixed(2)}%`,
         `MBS ${getGradeFromImpurity(row.averageImpurity)}`,
-        `${Math.round((row.averageConfidence || 0.88) * 100)}%`,
+        `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
         row.finalDecision.replace("_", " "),
         row.status,
         row.notes || "-"
@@ -366,13 +336,13 @@ export function HistoryPage() {
       {/* ─── Top Station Header (Matches Dashboard Cockpit) ─── */}
       <div className="stationHeader">
         <div className="stationHeaderLeft">
-          <div className="stationLogoBadge" title="Pabrik Gula Trangkil (Pati)">
-            <img
-              src="/logo-trangkil.png"
+          <div className="stationLogoBadge" title={userFactory === "kebonagung" ? "PG Kebon Agung (Malang)" : userFactory === "trangkil" ? "PG Trangkil (Pati)" : "Semua Pabrik"}>
+            {userFactory !== "kebonagung" && <img
+              src={`${import.meta.env.BASE_URL}logo-trangkil.png`}
               alt="Pabrik Gula Trangkil"
               className="stationTrangkilLogo"
-            />
-            <span className="stationFactoryCity">Pati, Jawa Tengah</span>
+            />}
+            <span className="stationFactoryCity">{userFactory === "kebonagung" ? "PG Kebon Agung, Malang" : userFactory === "trangkil" ? "Pati, Jawa Tengah" : "Riwayat Semua Pabrik"}</span>
           </div>
 
           <div className="historyTitleBadge">
@@ -388,11 +358,11 @@ export function HistoryPage() {
               disabled
               title="Semua Meja — Jalur Terkunci (Hanya MBS 5 yang aktif di PG Trangkil)"
             >
-              <Lock size={10} />
+              <Layers size={10} />
               <span>Semua Meja</span>
             </button>
             {[1, 2, 3, 4, 5].map((lineNum) => {
-              const isLocked = lineNum !== 5;
+              const isLocked = !availableLines.has(lineNum);
               const isSelected = selectedLineFilter === lineNum;
               return (
                 <button
@@ -545,7 +515,7 @@ export function HistoryPage() {
               {averageConfidence}
             </strong>
             <span className="historyKpiSub">
-              Model ONNX PG Trangkil Active
+              {status?.ai.model?.available ? "Model ONNX Aktif" : "Model ONNX Belum Tersedia"}
             </span>
           </div>
 
@@ -647,7 +617,7 @@ export function HistoryPage() {
             </div>
 
             {/* 3. MBS Station Field (Hanya MBS 5 Aktif, Lainnya Terkunci) */}
-            <div className={`cockpitField ${selectedLineFilter !== 5 && selectedLineFilter !== "all" ? "hasValue" : ""}`}>
+            <div className={`cockpitField ${selectedLineFilter !== "all" ? "hasValue" : ""}`}>
               <label className="cockpitFieldLabel">
                 <Building2 size={10} />
                 <span>MEJA TEBU (MBS)</span>
@@ -658,12 +628,8 @@ export function HistoryPage() {
                   onChange={(e) => setSelectedLineFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
                   className="cockpitSelect"
                 >
-                  <option value="all" disabled>🔒 Semua Meja (Terkunci)</option>
-                  <option value={1} disabled>🔒 MBS 1 (Terkunci)</option>
-                  <option value={2} disabled>🔒 MBS 2 (Terkunci)</option>
-                  <option value={3} disabled>🔒 MBS 3 (Terkunci)</option>
-                  <option value={4} disabled>🔒 MBS 4 (Terkunci)</option>
-                  <option value={5}>MBS 5 (Wisenet • Aktif)</option>
+                  <option value="all">Semua Meja</option>
+                  {[1, 2, 3, 4, 5].map(line => <option key={line} value={line} disabled={!availableLines.has(line)}>MBS {line}{availableLines.has(line) ? "" : " (Tidak tersedia)"}</option>)}
                 </select>
                 <ChevronDown size={11} className="selectChevronIcon" />
               </div>
@@ -957,7 +923,7 @@ export function HistoryPage() {
                     {filteredHistory.map((row) => {
                       const g = normalizeGrade(row.grade);
                       const curConfig = TRANGKIL_GRADES.find(item => item.code === g) || TRANGKIL_GRADES[1];
-                      const confPct = Math.round((row.confidence || 0.88) * 100);
+                      const confPct = Math.round((row.confidence ?? 0) * 100);
 
                       return (
                         <tr key={row.id}>
@@ -1073,7 +1039,7 @@ export function HistoryPage() {
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
         const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
-        const confPct = Math.round((selectedCapture.confidence || 0.88) * 100);
+        const confPct = Math.round((selectedCapture.confidence ?? 0) * 100);
         const station = resolveMbsStation(selectedCapture.cameraId, cameras);
         const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", {
           day: "2-digit",

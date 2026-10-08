@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
+from contextlib import asynccontextmanager
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from random import random
-from typing import Dict, List, Optional
+from uuid import uuid4
+from typing import Dict, List, Optional, Tuple, Literal
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from streamer import (
     DEFAULT_ROIS,
@@ -33,7 +37,16 @@ CONFIG_PATH = MODEL_DIR / "config.json"
 SNAPSHOTS_DIR = ROOT / "storage" / "snapshots"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Tebu AI Service", version="0.2.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    stream_manager.get_or_create(1, DEFAULT_KEBONAGUNG_RTSP, "MBS 1 - PT Kebon Agung (Malang)")
+    stream_manager.get_or_create(2, DEFAULT_TRANGKIL_WISENET_RTSP, "MBS 5 - PT Trangkil (Wisenet Meja 5)")
+    try:
+        yield
+    finally:
+        stream_manager.stop_all()
+
+app = FastAPI(title="Tebu AI Service", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,9 +67,12 @@ class ModelConfig(BaseModel):
     name: str
     version: str
     type: str
-    input_size: int
-    classes: List[str]
-    threshold: float = 0.5
+    input_size: int = Field(gt=0, le=4096)
+    classes: List[str] = Field(min_length=1)
+    threshold: float = Field(0.5, ge=0, le=1)
+    output_activation: Literal["probabilities", "sigmoid", "softmax"] = "probabilities"
+    input_color: Literal["rgb", "bgr"] = "rgb"
+    model_path: str = "models/active/model.onnx"
 
 
 class CameraRegisterPayload(BaseModel):
@@ -75,35 +91,86 @@ def load_config() -> ModelConfig:
 DEFAULT_KEBONAGUNG_RTSP = "rtsp://admin:qc_12345@123.255.202.132:10554/Streaming/Channels/101"
 DEFAULT_TRANGKIL_WISENET_RTSP = "rtsp://admin:XNOAdmin123@192.168.33.86:554/profile2/media.smp"
 
-stream_manager.get_or_create(1, DEFAULT_KEBONAGUNG_RTSP, "MBS 1 - PT Kebon Agung (Malang)")
-stream_manager.get_or_create(2, DEFAULT_TRANGKIL_WISENET_RTSP, "MBS 5 - PT Trangkil (Wisenet Meja 5)")
+_session_lock = threading.Lock()
+_session_key = None
+_session = None
 
 
-def run_placeholder_inference(classes: List[str]) -> Dict[str, float]:
-    # Variasi realistik tebu untuk demo inspeksi jika ONNX belum ada
-    vals = [round(2.5 + random() * 4.0, 2), round(1.0 + random() * 2.5, 2), round(1.5 + random() * 3.0, 2)]
-    return {name: vals[i % len(vals)] for i, name in enumerate(classes)}
+def configured_model_path(config: ModelConfig) -> Path:
+    path = (ROOT / config.model_path).resolve()
+    if not path.is_relative_to((ROOT / "models").resolve()) or path.suffix.lower() != ".onnx":
+        raise HTTPException(status_code=400, detail="Lokasi model tidak valid")
+    return path
 
 
-def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Dict[str, float]:
-    if ort is None or not MODEL_PATH.exists():
-        return run_placeholder_inference(config.classes)
+def model_session(config: ModelConfig):
+    global _session, _session_key
+    path = configured_model_path(config)
+    if ort is None or not path.is_file():
+        raise HTTPException(status_code=503, detail="Model ONNX belum tersedia atau onnxruntime belum terpasang")
+    key = (str(path), path.stat().st_mtime_ns)
+    with _session_lock:
+        if _session_key != key:
+            candidate = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            _session = candidate
+            _session_key = key
+        return _session
+
+
+class ActivateModelPayload(BaseModel):
+    name: str
+    version: str
+    model_path: str
+
+
+@app.post("/models/activate")
+def activate_model(payload: ActivateModelPayload):
+    config = load_config().model_copy(update=payload.model_dump())
+    model_session(config)  # Validate the file before changing active configuration.
+    temporary = CONFIG_PATH.with_name(f"config.{uuid4().hex}.tmp")
+    try:
+        temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(temporary, CONFIG_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {"status": "ok", "model": config.name, "version": config.version}
+
+
+def segmentation_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[Dict[str, float], float]:
+    masks = np.asarray(output, dtype=np.float32)
+    if masks.ndim == 4 and masks.shape[0] == 1:
+        masks = masks[0]
+    if config.type != "segmentation" or masks.ndim != 3 or masks.shape[0] != len(config.classes) or masks.size == 0 or not np.isfinite(masks).all():
+        raise HTTPException(status_code=422, detail="Output model harus berupa peta segmentasi [1, kelas, tinggi, lebar] sesuai konfigurasi")
+    if config.output_activation == "sigmoid":
+        masks = 1.0 / (1.0 + np.exp(-np.clip(masks, -80, 80)))
+    elif config.output_activation == "softmax":
+        shifted = masks - masks.max(axis=0, keepdims=True)
+        masks = np.exp(shifted)
+        masks /= masks.sum(axis=0, keepdims=True)
+    elif masks.min() < 0 or masks.max() > 1:
+        raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
+    scores = masks.max(axis=0)
+    winners = masks.argmax(axis=0)
+    confident = scores > config.threshold
+    # Count the full pixel map rather than the first few values of a flattened tensor.
+    classes = {name: round(float(np.mean((winners == index) & confident)) * 100, 2) for index, name in enumerate(config.classes)}
+    return classes, round(float(scores.mean()), 4)
+
+
+def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
+    session = model_session(config)
 
     resized = cv2.resize(image, (config.input_size, config.input_size))
+    if config.input_color == "rgb":
+        resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     tensor = resized.astype("float32") / 255.0
     tensor = tensor.transpose(2, 0, 1)[None, ...]
 
-    session = ort.InferenceSession(str(MODEL_PATH), providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: tensor})
 
-    flat = outputs[0].reshape(-1)
-    total = float(abs(flat).sum()) or 1.0
-    result = {}
-    for index, class_name in enumerate(config.classes):
-        value = abs(float(flat[index % len(flat)])) / total * 100
-        result[class_name] = round(value, 2)
-    return result
+    return segmentation_measurement(outputs[0], config)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
@@ -116,10 +183,11 @@ def health():
     return {
         "status": "ok",
         "service": "ai-service",
+        "capabilities": {"conveyor_empty": False},
         "model": {
             "name": config.name,
             "version": config.version,
-            "available": MODEL_PATH.exists(),
+            "available": configured_model_path(config).is_file() and ort is not None,
         },
         "camera_1_live": s1.is_connected if s1 else False,
         "camera_1_fps": round(s1.fps, 1) if s1 else 0.0,
@@ -147,9 +215,9 @@ def reconnect_camera(camera_id: int):
 async def video_stream(
     camera_id: int,
     overlay: bool = Query(True, description="Render ROI and HUD overlays on frame"),
-    target_width: int = Query(1280, description="Target frame width"),
-    fps: int = Query(25, description="Target frame rate"),
-    quality: int = Query(80, description="JPEG quality 1-100"),
+    target_width: int = Query(1280, ge=1, le=4096, description="Target frame width"),
+    fps: int = Query(25, ge=1, le=60, description="Target frame rate"),
+    quality: int = Query(80, ge=1, le=100, description="JPEG quality 1-100"),
 ):
     stream = stream_manager.get_stream(camera_id)
     if not stream:
@@ -159,7 +227,7 @@ async def video_stream(
         stream.start()
 
     return StreamingResponse(
-        stream.get_stream_async(overlay=overlay),
+        stream.get_stream_async(overlay=overlay, target_width=target_width, quality=quality, fps=fps),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -174,8 +242,8 @@ def snapshot(
     camera_id: int,
     overlay: bool = Query(True, description="Render ROI HUD"),
     crop_roi: bool = Query(False, description="Crop frame to ROI"),
-    target_width: int = Query(1280, description="Target width"),
-    quality: int = Query(85, description="JPEG quality"),
+    target_width: int = Query(1280, ge=1, le=4096, description="Target width"),
+    quality: int = Query(85, ge=1, le=100, description="JPEG quality"),
 ):
     stream = stream_manager.get_stream(camera_id)
     if not stream:
@@ -227,7 +295,8 @@ def register_camera(payload: CameraRegisterPayload):
 def infer(payload: InferRequest):
     config = load_config()
     image = None
-    snapshot_filename = f"capture_{int(time.time() * 1000)}.jpg"
+    captured_at = datetime.now(timezone.utc).isoformat()
+    snapshot_filename = f"capture_{uuid4().hex}.jpg"
     snapshot_path = SNAPSHOTS_DIR / snapshot_filename
 
     if payload.camera_id:
@@ -249,10 +318,9 @@ def infer(payload: InferRequest):
     if image is None:
         raise HTTPException(status_code=400, detail="No valid camera stream or image provided for inference")
 
-    # Save snapshot to disk
-    cv2.imwrite(str(snapshot_path), image)
-
-    classes = run_onnx_inference(image, config)
+    classes, confidence = run_onnx_inference(image, config)
+    if not cv2.imwrite(str(snapshot_path), image):
+        raise HTTPException(status_code=500, detail="Gagal menyimpan snapshot")
     daun = classes.get("daun", 0.0)
     pucuk = classes.get("pucuk", 0.0)
     sampah = classes.get("sampah", 0.0)
@@ -274,11 +342,11 @@ def infer(payload: InferRequest):
         grade = "S"
 
     return {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": captured_at,
         "camera_id": payload.camera_id,
         "classes": classes,
         "grade": grade,
         "total_impurity": total_impurity,
-        "confidence": 0.94 if MODEL_PATH.exists() else 0.88,
+        "confidence": confidence,
         "snapshot_path": f"storage/snapshots/{snapshot_filename}",
     }

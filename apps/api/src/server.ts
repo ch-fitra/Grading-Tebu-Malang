@@ -16,9 +16,11 @@ import { store, DEFAULT_CAMERAS } from "./store.js";
 import { auth, PERMISSIONS, type Permission, type User } from "./auth.js";
 import { trucks } from "./trucks.js";
 import { calculateGrade } from "./rule-engine.js";
+import { pool } from "./db.js";
 
-const app = Fastify({ logger: { redact: { paths: ["req.url"], censor: "[redacted]" } } });
+const app = Fastify({ logger: process.env.API_TEST_MODE === "true" ? false : { redact: { paths: ["req.url"], censor: "[redacted]" } } });
 const clients = new Set<{ send: (payload: string) => void }>();
+app.addHook("onClose", async () => { await pool.end(); });
 
 await store.initialize();
 await auth.initialize();
@@ -44,32 +46,68 @@ const access: Record<string, Permission> = {
   "POST /api/truck-inspections/sync-tapping": "inspection.write", "DELETE /api/truck-inspections/:id": "inspection.write",
   "POST /api/cameras/:id/capture": "inspection.write",
   "POST /api/cameras/:id/roi": "camera.write",
+  "GET /api/cameras/:id/roi": "camera.read",
+  "POST /api/cameras/:id/reconnect": "camera.read",
   "DELETE /api/inference/:id": "inspection.write",
   "DELETE /api/inference": "inspection.write"
 };
 
 app.addHook("preHandler", async (request, reply) => {
-  const url = request.url;
-  // Exempt public stream/snapshot/health/auth endpoints
-  if (
-    url === "/health" ||
-    url === "/api/auth/login" ||
-    url.startsWith("/ws") ||
-    url.includes("/stream") ||
-    url.includes("/reconnect") ||
-    url.includes("/snapshot") ||
-    url.startsWith("/storage/snapshots")
-  ) {
-    return;
-  }
+  const route = request.routeOptions.url;
+  if (route === "/health" || route === "/api/auth/login" || route === "/ws" ||
+      (request.method === "GET" && ["/api/cameras/:id/stream", "/api/cameras/:id/snapshot", "/storage/snapshots/:filename"].includes(route ?? ""))) return;
 
   const token = request.headers.authorization?.replace(/^Bearer /i, "") ?? "";
   const user = await auth.current(token);
   if (!user) return reply.code(401).send({ message: "Sesi tidak valid atau telah berakhir" });
   const key = `${request.method} ${request.routeOptions.url ?? request.url.split("?")[0]}`;
-  if (key === "GET /api/auth/me" || key.endsWith("/roi")) return;
+  if (key === "GET /api/auth/me") return;
   const permission = access[key];
   if (!permission || !user.permissions.includes(permission)) return reply.code(403).send({ message: "Akses ditolak" });
+  const params = request.params as { id?: string };
+  if (params.id && route?.startsWith("/api/truck-inspections/") && !z.string().uuid().safeParse(params.id).success)
+    return reply.code(400).send({ message: "ID inspeksi tidak valid" });
+  if (params.id && ["/api/cameras/", "/api/inference/", "/api/users/", "/api/roles/"].some(prefix => route?.startsWith(prefix)) && !z.coerce.number().int().positive().safeParse(params.id).success)
+    return reply.code(400).send({ message: "ID tidak valid" });
+  const factory = getFactoryFilter(user.username);
+  if (factory !== "all") {
+    const cameras = await store.listCameras();
+    const allowed = new Set(cameras.filter(camera => cameraInFactory(camera, factory)).map(camera => camera.id));
+    if (params.id && route?.startsWith("/api/cameras/") && !allowed.has(Number(params.id)))
+      return reply.code(403).send({ message: "Kamera berada di luar akses pabrik" });
+    if (params.id && route?.startsWith("/api/truck-inspections/")) {
+      const truck = await trucks.get(params.id);
+      if (truck && !allowed.has(truck.line)) return reply.code(403).send({ message: "Inspeksi berada di luar akses pabrik" });
+    }
+    if (params.id && route === "/api/inference/:id") {
+      const inference = await store.getInference(Number(params.id));
+      if (inference && !allowed.has(inference.cameraId)) return reply.code(403).send({ message: "Data berada di luar akses pabrik" });
+    }
+    if (route === "/api/truck-inspections" && request.method === "POST" && !allowed.has(Number((request.body as { line?: number })?.line)))
+      return reply.code(403).send({ message: "Jalur berada di luar akses pabrik" });
+    if (route === "/api/truck-inspections/sync-tapping") {
+      const matches = (request.body as { matches?: { id: string }[] })?.matches;
+      if (Array.isArray(matches)) {
+        if (matches.some(match => !z.string().uuid().safeParse(match?.id).success)) return reply.code(400).send({ message: "ID inspeksi tidak valid" });
+        const all = (await pool.query("SELECT id,line FROM truck_inspections WHERE id=ANY($1::uuid[])", [matches.map(match => match.id)])).rows;
+        if (all.some(truck => !allowed.has(Number(truck.line))))
+          return reply.code(403).send({ message: "Inspeksi berada di luar akses pabrik" });
+      }
+    }
+    if (route === "/api/cameras" && request.method === "POST" && !cameraInFactory((request.body ?? {}) as { name: string; location: string }, factory))
+      return reply.code(403).send({ message: "Kamera berada di luar akses pabrik" });
+    if (route === "/api/cameras/:id" && request.method === "PUT") {
+      const camera = cameras.find(item => item.id === Number(params.id));
+      if (camera && !cameraInFactory({ ...camera, ...(request.body as object) }, factory))
+        return reply.code(403).send({ message: "Kamera tidak dapat dipindahkan ke pabrik lain" });
+    }
+    if (route === "/api/users" && request.method === "POST" && getFactoryFilter(String((request.body as { username?: string })?.username ?? "")) !== factory)
+      return reply.code(403).send({ message: "User berada di luar akses pabrik" });
+    if (route === "/api/users/:id") {
+      const target = (await auth.listUsers()).find(item => item.id === Number(params.id));
+      if (target && getFactoryFilter(target.username) !== factory) return reply.code(403).send({ message: "User berada di luar akses pabrik" });
+    }
+  }
 });
 
 function broadcast(event: string, data: unknown) {
@@ -126,15 +164,27 @@ function getFactoryFilter(username: string): "trangkil" | "kebonagung" | "all" {
   if (u.includes("trangkil")) return "trangkil";
   return "all";
 }
+function cameraInFactory(camera: { name: string; location: string }, factory: string): boolean {
+  const text = `${camera.name ?? ""} ${camera.location ?? ""}`.toLowerCase();
+  return factory === "all" || (factory === "trangkil" ? text.includes("trangkil") : text.includes("kebon agung") || text.includes("malang"));
+}
+async function factoryCameraIds(actor: User): Promise<number[] | undefined> {
+  const factory = getFactoryFilter(actor.username);
+  return factory === "all" ? undefined : (await store.listCameras()).filter(camera => cameraInFactory(camera, factory)).map(camera => camera.id);
+}
 const roleInput = z.object({ code: z.string().regex(/^[a-z][a-z0-9_]{2,49}$/), name: z.string().min(2).max(100), description: z.string().max(500).default(""), permissions: z.array(z.enum(PERMISSIONS)).default([]) });
 app.get("/api/roles", async request => auth.listVisibleRoles((await currentUser(request.headers.authorization))!));
 app.post("/api/roles", async (request, reply) => {
   const parsed = roleInput.safeParse(request.body); if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+  const actor = (await currentUser(request.headers.authorization))!;
+  if (actor.role !== "developer" && parsed.data.permissions.some(permission => !actor.permissions.includes(permission))) return reply.code(403).send({ message: "Tidak diizinkan memberikan hak akses yang lebih tinggi" });
   try { return await auth.createRole({ ...parsed.data, permissions: [...new Set(parsed.data.permissions)] }); }
   catch { return reply.code(409).send({ message: "Kode role sudah digunakan" }); }
 });
 app.put("/api/roles/:id", async (request, reply) => {
   const parsed = roleInput.omit({ code: true }).safeParse(request.body); if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+  const actor = (await currentUser(request.headers.authorization))!;
+  if (actor.role !== "developer" && parsed.data.permissions.some(permission => !actor.permissions.includes(permission))) return reply.code(403).send({ message: "Tidak diizinkan memberikan hak akses yang lebih tinggi" });
   const role = await auth.updateRole(Number((request.params as { id: string }).id), { ...parsed.data, permissions: [...new Set(parsed.data.permissions)] });
   return role ?? reply.code(403).send({ message: "Role sistem tidak dapat diubah" });
 });
@@ -148,8 +198,7 @@ app.get("/api/users", async (request) => {
   const factory = getFactoryFilter(actor.username);
   const allUsers = await auth.listUsers();
   
-  // Sembunyikan alias internal singkat agar tabel rapi menampilkan 2 akun per PT
-  const cleanUsers = allUsers.filter(u => u.username !== "trangkil" && u.username !== "kebonagung" && u.username !== "admin");
+  const cleanUsers = allUsers;
 
   if (actor.role === "developer") {
     return cleanUsers;
@@ -168,7 +217,7 @@ app.post("/api/users", async (request, reply) => {
   const parsed = userInput.safeParse(request.body); if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
   const role = (await auth.listRoles()).find(r => r.id === parsed.data.roleId);
   if (!role) return reply.code(400).send({ message: "Role tidak ditemukan" });
-  if (actor.role !== "developer" && role.code === "developer") return reply.code(403).send({ message: "Hanya developer yang dapat membuat akun developer" });
+  if (actor.role !== "developer" && (role.code === "developer" || role.permissions.some(permission => !actor.permissions.includes(permission)))) return reply.code(403).send({ message: "Tidak diizinkan memberikan hak akses yang lebih tinggi" });
   try { return await auth.createUser(parsed.data); } catch { return reply.code(409).send({ message: "Username sudah digunakan" }); }
 });
 
@@ -180,7 +229,7 @@ app.patch("/api/users/:id", async (request, reply) => {
   const target = (await auth.listUsers()).find(u => u.id === id); if (!target) return reply.code(404).send({ message: "User tidak ditemukan" });
   const role = (await auth.listRoles()).find(r => r.id === (parsed.data.roleId ?? target.roleId));
   if (!role) return reply.code(400).send({ message: "Role tidak ditemukan" });
-  if (actor.role !== "developer" && role.code === "developer") return reply.code(403).send({ message: "Tidak diizinkan mengubah ke role developer" });
+  if (actor.role !== "developer" && (target.role === "developer" || role.code === "developer" || role.permissions.some(permission => !actor.permissions.includes(permission)))) return reply.code(403).send({ message: "Tidak diizinkan mengubah akun developer atau memberikan hak akses lebih tinggi" });
   if (actor.id === id && parsed.data.active === false) return reply.code(400).send({ message: "Tidak dapat menonaktifkan akun sendiri" });
   if (target.role === "developer" && (parsed.data.active === false || role.code !== "developer")) {
     const developers = (await auth.listUsers()).filter(u => u.role === "developer" && u.active);
@@ -249,6 +298,20 @@ app.post("/api/deletion-requests", async (request, reply) => {
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
   const factory = getFactoryFilter(actor.username);
+  const input = parsed.data;
+  if (input.targetType === "truck_inspection" && !z.string().uuid().safeParse(input.targetId).success)
+    return reply.code(400).send({ message: "ID inspeksi tidak valid" });
+  if (input.targetType === "inference" && !z.coerce.number().int().positive().safeParse(input.targetId).success)
+    return reply.code(400).send({ message: "ID inferensi tidak valid" });
+  if (input.targetType !== "all_inferences") {
+    const target = input.targetType === "truck_inspection"
+      ? await trucks.get(String(input.targetId))
+      : await store.getInference(Number(input.targetId));
+    if (!target) return reply.code(404).send({ message: "Data yang diajukan tidak ditemukan" });
+    const allowed = await factoryCameraIds(actor);
+    const cameraId = "line" in target ? target.line : target.cameraId;
+    if (allowed && !allowed.includes(cameraId)) return reply.code(403).send({ message: "Data berada di luar akses pabrik" });
+  }
   const created = await store.createDeletionRequest({
     ...parsed.data,
     factory,
@@ -280,7 +343,8 @@ app.post("/api/deletion-requests/:id/review", async (request, reply) => {
     id,
     parsed.data.decision,
     actor.username,
-    parsed.data.reviewNotes
+    parsed.data.reviewNotes,
+    getFactoryFilter(actor.username)
   );
 
   if (!reviewed) {
@@ -289,7 +353,6 @@ app.post("/api/deletion-requests/:id/review", async (request, reply) => {
 
   if (reviewed.status === "approved") {
     if (reviewed.targetType === "truck_inspection") {
-      await trucks.delete(String(reviewed.targetId));
       broadcast("truck.deleted", { id: String(reviewed.targetId) });
     } else if (reviewed.targetType === "inference") {
       broadcast("inference.deleted", { id: Number(reviewed.targetId) });
@@ -305,7 +368,7 @@ app.post("/api/deletion-requests/:id/review", async (request, reply) => {
 app.get("/api/system/status", async () => {
   let ai = { status: "offline" };
   try {
-    const response = await fetch(`${config.aiServiceUrl}/health`);
+    const response = await fetch(`${config.aiServiceUrl}/health`, { signal: AbortSignal.timeout(5000) });
     ai = response.ok ? await response.json() : { status: "degraded" };
   } catch {
     ai = { status: "offline" };
@@ -406,7 +469,7 @@ app.get("/api/cameras/:id/stream", async (request, reply) => {
 app.post("/api/cameras/:id/reconnect", async (request, reply) => {
   const { id } = request.params as { id: string };
   try {
-    const upstream = await fetch(`${config.aiServiceUrl}/stream/${id}/reconnect`, { method: "POST" });
+    const upstream = await fetch(`${config.aiServiceUrl}/stream/${id}/reconnect`, { method: "POST", signal: AbortSignal.timeout(10000) });
     return reply.send({ ok: upstream.ok });
   } catch {
     return reply.send({ ok: false });
@@ -433,9 +496,9 @@ app.get("/api/cameras/:id/snapshot", async (request, reply) => {
 app.get("/api/cameras/:id/roi", async (request, reply) => {
   const { id } = request.params as { id: string };
   try {
-    const res = await fetch(`${config.aiServiceUrl}/roi/${id}`);
+    const res = await fetch(`${config.aiServiceUrl}/roi/${id}`, { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
-    return reply.send(data);
+    return reply.code(res.status).send(data);
   } catch {
     return reply.code(502).send({ message: "Gagal memuat konfigurasi ROI" });
   }
@@ -447,10 +510,11 @@ app.post("/api/cameras/:id/roi", async (request, reply) => {
     const res = await fetch(`${config.aiServiceUrl}/roi/${id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request.body)
+      body: JSON.stringify(request.body),
+      signal: AbortSignal.timeout(5000)
     });
     const data = await res.json();
-    return reply.send(data);
+    return reply.code(res.status).send(data);
   } catch {
     return reply.code(502).send({ message: "Gagal menyimpan konfigurasi ROI" });
   }
@@ -476,6 +540,7 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
     const aiRes = await fetch(`${config.aiServiceUrl}/infer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({ camera_id: id, crop_roi: true })
     });
 
@@ -542,9 +607,16 @@ app.post("/api/models/upload", async (request, reply) => {
 });
 
 app.post("/api/models/activate", async (request, reply) => {
-  const parsed = z.object({ id: z.number() }).safeParse(request.body);
+  const parsed = z.object({ id: z.number().int().positive() }).safeParse(request.body);
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-  const model = await store.activateModel(parsed.data.id);
+  const model = await store.activateModel(parsed.data.id, async selected => {
+    const response = await fetch(`${config.aiServiceUrl}/models/activate`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: selected.name, version: selected.version, model_path: selected.path }),
+      signal: AbortSignal.timeout(30000)
+    });
+    if (!response.ok) throw Object.assign(new Error("Model tidak dapat diaktifkan oleh AI service"), { statusCode: 502 });
+  });
   if (!model) return reply.code(404).send({ message: "Model not found" });
   broadcast("model.activated", model);
   return model;
@@ -588,7 +660,7 @@ app.delete("/api/inference/:id", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
   if (!(await checkAdminApproval(request, actor, reply))) return;
   const id = Number((request.params as { id: string }).id);
-  await store.deleteInference(id);
+  if (!(await store.deleteInference(id))) return reply.code(404).send({ message: "Data inferensi tidak ditemukan" });
   broadcast("inference.deleted", { id });
   return { ok: true, id };
 });
@@ -596,7 +668,7 @@ app.delete("/api/inference/:id", async (request, reply) => {
 app.delete("/api/inference", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
   if (!(await checkAdminApproval(request, actor, reply))) return;
-  await store.clearAllInferences();
+  await store.clearAllInferences(await factoryCameraIds(actor));
   broadcast("inference.cleared", {});
   return { ok: true };
 });
@@ -655,13 +727,13 @@ app.patch("/api/truck-inspections/:id/complete", async (request, reply) => {
 app.post("/api/truck-inspections/sync-tapping", async (request, reply) => {
   const syncSchema = z.object({
     matches: z.array(z.object({
-      id: z.string(),
-      truckCode: z.string().optional(),
-      plateNumber: z.string().optional(),
-      driverName: z.string().optional(),
-      supplier: z.string().optional(),
-      notes: z.string().optional()
-    }))
+      id: z.string().uuid(),
+      truckCode: z.string().trim().min(1).max(100).optional(),
+      plateNumber: z.string().max(30).optional(),
+      driverName: z.string().max(100).optional(),
+      supplier: z.string().max(150).optional(),
+      notes: z.string().max(2000).optional()
+    })).min(1).max(500).refine(matches => new Set(matches.map(item => item.id)).size === matches.length, "ID inspeksi duplikat")
   });
   const parsed = syncSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -672,11 +744,11 @@ app.post("/api/truck-inspections/sync-tapping", async (request, reply) => {
 app.patch("/api/truck-inspections/:id", async (request, reply) => {
   const id = (request.params as { id: string }).id;
   const patchSchema = z.object({
-    truckCode: z.string().optional(),
-    plateNumber: z.string().optional(),
-    driverName: z.string().optional(),
-    supplier: z.string().optional(),
-    notes: z.string().optional()
+    truckCode: z.string().trim().min(1).max(100).optional(),
+    plateNumber: z.string().max(30).optional(),
+    driverName: z.string().max(100).optional(),
+    supplier: z.string().max(150).optional(),
+    notes: z.string().max(2000).optional()
   });
   const parsed = patchSchema.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -688,7 +760,7 @@ app.patch("/api/truck-inspections/:id", async (request, reply) => {
 app.delete("/api/truck-inspections", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
   if (!(await checkAdminApproval(request, actor, reply))) return;
-  await trucks.clearAll();
+  await trucks.clearAll(await factoryCameraIds(actor));
   broadcast("truck.cleared", {});
   return { ok: true };
 });
@@ -702,4 +774,5 @@ app.delete("/api/truck-inspections/:id", async (request, reply) => {
   return { ok: true };
 });
 
-app.listen({ host: config.host, port: config.port });
+export { app };
+if (process.env.API_TEST_MODE !== "true") await app.listen({ host: config.host, port: config.port });

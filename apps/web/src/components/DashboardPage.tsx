@@ -282,6 +282,8 @@ export function normalizeGrade(rawGrade?: string | null): TrangkilGradeCode {
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
   const isAdmin = session?.user.role === "admin";
+  const canInspect = !isAdmin && (session?.user.permissions.includes("inspection.write") ?? false);
+  const captureInFlight = useRef(false);
   const isOperator = session?.user.role === "operator";
   const [requestDeletionTarget, setRequestDeletionTarget] = useState<{
     id: number;
@@ -445,7 +447,7 @@ export function DashboardPage() {
   }, [activeCycle?.id]);
 
   async function handleStopCycle(reason?: string) {
-    if (!activeCycle) return;
+    if (!activeCycle || !canInspect) return;
     try {
       if (autoScanTimerRef.current) {
         clearInterval(autoScanTimerRef.current);
@@ -461,7 +463,7 @@ export function DashboardPage() {
 
   // Continuous auto-scan during active cycle
   useEffect(() => {
-    if (!activeCycle || !targetCameraId) {
+    if (!activeCycle || !targetCameraId || !canInspect) {
       if (autoScanTimerRef.current) {
         clearInterval(autoScanTimerRef.current);
         autoScanTimerRef.current = null;
@@ -469,18 +471,20 @@ export function DashboardPage() {
       return;
     }
 
+    let cancelled = false;
     const interval = setInterval(async () => {
-      if (capturing) return;
+      if (capturing || captureInFlight.current || cancelled) return;
+      captureInFlight.current = true;
       try {
         const res = await api<InferenceResult>(`/api/cameras/${targetCameraId}/capture`, {
           method: "POST",
           body: JSON.stringify({})
         });
+        if (cancelled) return;
         await refresh();
 
         // Check if tebu is out of frame (empty conveyor)
-        const totalImp = res.classes.daun + res.classes.pucuk + res.classes.sampah;
-        if (autoStopEnabled && totalImp === 0) {
+        if (autoStopEnabled && res.conveyorEmpty === true) {
           emptyFrameCountRef.current += 1;
           if (emptyFrameCountRef.current >= 3) {
             handleStopCycle("Auto-Stop: Tebu telah keluar dari frame CCTV (Meja Bersih)");
@@ -490,14 +494,17 @@ export function DashboardPage() {
         }
       } catch (err) {
         console.warn("Auto-cycle error:", err);
+      } finally {
+        captureInFlight.current = false;
       }
     }, 1800);
 
     autoScanTimerRef.current = interval;
-    return () => clearInterval(interval);
-  }, [activeCycle?.id, targetCameraId, autoStopEnabled, capturing]);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [activeCycle?.id, targetCameraId, autoStopEnabled, capturing, canInspect]);
 
   async function handleStartCycle() {
+    if (!canInspect) return;
     if (isAdmin) {
       alert("Akun Admin (Direksi) dibatasi dari kontrol fisik pemindaian conveyor. Hanya Akun Operator lapangan yang dapat memulai siklus.");
       return;
@@ -588,7 +595,8 @@ export function DashboardPage() {
   }, [isStreaming, targetCameraId, currentLineDef?.locked]);
 
   async function handleManualCapture() {
-    if (capturing || !targetCameraId) return;
+    if (capturing || captureInFlight.current || !targetCameraId || !canInspect) return;
+    captureInFlight.current = true;
     setCapturing(true);
     try {
       const res = await api<InferenceResult>(`/api/cameras/${targetCameraId}/capture`, {
@@ -602,6 +610,7 @@ export function DashboardPage() {
     } catch (err) {
       alert("Gagal melakukan capture AI: " + (err instanceof Error ? err.message : String(err)));
     } finally {
+      captureInFlight.current = false;
       setCapturing(false);
     }
   }
@@ -684,7 +693,7 @@ export function DashboardPage() {
       const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
       const avgSampah = Math.round((sumSampah / count) * 10) / 10;
       const avgImp = Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
-      const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence || 0.88), 0) / count;
+      const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: avgConf,
@@ -709,7 +718,7 @@ export function DashboardPage() {
       const avgImp = selectedCycle.averageImpurity ?? Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
-        confidence: selectedCycle.averageConfidence || 0.88,
+        confidence: selectedCycle.averageConfidence ?? 0,
         grade: getGradeFromImpurity(avgImp),
         id: displayedCaptures[0]?.id || 0,
         timestamp: selectedCycle.startedAt,
@@ -738,7 +747,7 @@ export function DashboardPage() {
       : 0;
 
     const avgConfidence = cycles.length > 0
-      ? cycles.reduce((acc, c) => acc + (c.averageConfidence || 0.88), 0) / cycles.length
+      ? cycles.reduce((acc, c) => acc + (c.averageConfidence ?? 0), 0) / cycles.length
       : 0.88;
 
     const overallGrade = getGradeFromImpurity(avgImpurity);
@@ -810,7 +819,7 @@ export function DashboardPage() {
   const grade = effectiveInference?.grade;
   const impurity = classes.daun + classes.pucuk + classes.sampah;
   const background = hasLatestInference ? Math.max(0, 100 - impurity) : 0;
-  const gradeConf = Math.min(0.99, Math.max(0.70, confidence || 0.88));
+  const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
 
   // Distribusi Probabilitas 7 Kelas MBS Model AI PT Trangkil
   const gradeDistribution = useMemo(() => {
@@ -974,6 +983,8 @@ export function DashboardPage() {
 
   const isOnline = status?.backend.status === "ok";
   const isAiOnline = status?.ai.status === "ok";
+  const cameraLive = targetCameraId === 1 ? status?.ai.camera_1_live : targetCameraId === 2 ? status?.ai.camera_2_live : false;
+  const canAutoStop = status?.ai.capabilities?.conveyor_empty === true;
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
@@ -1147,7 +1158,7 @@ export function DashboardPage() {
                       type="button"
                       className={`stStreamBtn captureBtn ${captureFeedback ? "success" : ""}`}
                       onClick={handleManualCapture}
-                      disabled={capturing}
+                      disabled={capturing || !canInspect || !status?.ai.model?.available}
                       title="AI Capture"
                     >
                       <Camera size={12} />
@@ -1321,6 +1332,7 @@ export function DashboardPage() {
                       <button
                         type="button"
                         className="stopCycleBtn"
+                        disabled={!canInspect}
                         onClick={() => handleStopCycle("Dihentikan secara manual oleh operator")}
                         title="Hentikan pemindaian dan simpan siklus ini"
                       >
@@ -1337,9 +1349,10 @@ export function DashboardPage() {
                           <input
                             type="checkbox"
                             checked={autoStopEnabled}
+                            disabled={!canInspect || !canAutoStop}
                             onChange={(e) => setAutoStopEnabled(e.target.checked)}
                           />
-                          <span>Auto-Stop Out-of-Frame</span>
+                          <span>{canAutoStop ? "Auto-Stop Out-of-Frame" : "Auto-Stop Belum Tersedia"}</span>
                         </label>
                       </div>
                     </div>
@@ -1349,7 +1362,7 @@ export function DashboardPage() {
                         type="button"
                         className="startCycleBtn"
                         onClick={handleStartCycle}
-                        disabled={!targetCameraId || !isStreaming}
+                        disabled={!canInspect || !targetCameraId || !isStreaming}
                         title="Mulai deteksi siklus saat tebu diletakkan ke meja tebu"
                       >
                         <Play size={13} fill="currentColor" />
@@ -1365,9 +1378,10 @@ export function DashboardPage() {
                           <input
                             type="checkbox"
                             checked={autoStopEnabled}
+                            disabled={!canInspect || !canAutoStop}
                             onChange={(e) => setAutoStopEnabled(e.target.checked)}
                           />
-                          <span>Auto-Stop Out-of-Frame</span>
+                          <span>{canAutoStop ? "Auto-Stop Out-of-Frame" : "Auto-Stop Belum Tersedia"}</span>
                         </label>
                       </div>
                     </div>
@@ -1421,14 +1435,14 @@ export function DashboardPage() {
             <div className="streamTelemetryStrip">
               <div className="telItem">
                 <span className="telLabel">STATUS KAMERA</span>
-                <strong className={targetCameraId && isStreaming ? "telGreen" : "telMuted"}>
-                  {targetCameraId && isStreaming ? "ONLINE" : "OFFLINE"}
+                <strong className={cameraLive ? "telGreen" : "telMuted"}>
+                  {cameraLive ? "ONLINE" : "OFFLINE"}
                 </strong>
               </div>
               <div className="telItem">
                 <span className="telLabel">AI MODEL</span>
-                <strong className={isAiOnline ? "telGreen" : "telMuted"}>
-                  {isAiOnline ? "ACTIVE" : "CHECKING"}
+                <strong className={status?.ai.model?.available ? "telGreen" : "telMuted"}>
+                  {status?.ai.model?.available ? "ACTIVE" : isAiOnline ? "UNAVAILABLE" : "OFFLINE"}
                 </strong>
               </div>
               <div className="telItem">
@@ -1496,7 +1510,7 @@ export function DashboardPage() {
                   normG === "B" ? "eventGradeBlue" :
                   normG === "D" ? "eventGradeSlate" : "eventGradeBlack";
                 const barColor = itemImpurity <= 5 ? "#2563eb" : itemImpurity <= 10 ? "#0284c7" : itemImpurity <= 15 ? "#f59e0b" : "#ef4444";
-                const confPercent = Math.round((item.confidence || 0.88) * 100);
+                const confPercent = Math.round((item.confidence ?? 0) * 100);
 
                 return (
                   <button
@@ -1777,7 +1791,7 @@ export function DashboardPage() {
                     </span>
                     <span>•</span>
                     <span>
-                      Akurasi AI: <strong>{Math.round((selectedCycle.averageConfidence || 0.88) * 100)}%</strong>
+                      Akurasi AI: <strong>{Math.round((selectedCycle.averageConfidence ?? 0) * 100)}%</strong>
                     </span>
                   </div>
                 </div>
@@ -2300,7 +2314,7 @@ export function DashboardPage() {
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
         const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
-        const confPercent = Math.round((selectedCapture.confidence || 0.88) * 100);
+        const confPercent = Math.round((selectedCapture.confidence ?? 0) * 100);
 
         const captureDate = new Date(selectedCapture.timestamp);
         const dateStr = captureDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });

@@ -18,14 +18,21 @@
     "dev:desktop": "npm run dev -w @sugarcane/desktop",
     "build": "npm run build -w @sugarcane/contracts && npm run build -w @sugarcane/api && npm run build -w @sugarcane/web && npm run build -w @sugarcane/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node --import tsx --test tests/tapping.test.ts tests/web-api.test.ts tests/web-store.test.ts",
+    "test:integration": "node --import tsx --test tests/api.integration.test.ts",
+    "test:ai": "python -m unittest discover -s tests -p test_ai.py -v",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:migrate": "npm run db:migrate -w @sugarcane/api"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "electron-builder": "26.15.3"
   },
   "engines": {
     "node": ">=22.12.0"
+  },
+  "overrides": {
+    "global-agent": "^4.1.3"
   }
 }

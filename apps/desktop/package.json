@@ -14,16 +14,23 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "electron": "44.4.1",
-    "electron-builder": "26.15.3",
     "typescript": "^5.7.2"
   },
   "build": {
     "appId": "id.xoora.tebuai",
     "productName": "TebuAI",
-    "files": ["dist/**/*"],
+    "files": [
+      "dist/**/*"
+    ],
     "npmRebuild": false,
     "extraResources": [
-      { "from": "../web/dist", "to": "renderer", "filter": ["**/*"] }
+      {
+        "from": "../web/dist",
+        "to": "renderer",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
       "signAndEditExecutable": false

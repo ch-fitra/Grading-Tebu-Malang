@@ -3392,7 +3392,7 @@ main {
   letter-spacing: 0.9px !important;
   margin: 6px 0 6px 4px !important;
   opacity: 0 !important;
-  height: 0 !important;
+  height: 14px !important;
   overflow: hidden !important;
   visibility: hidden !important;
   transition: opacity 180ms ease, height 180ms ease !important;
@@ -3402,7 +3402,7 @@ main {
 .sidebar:hover .sidebarMenuLabel,
 .sidebar:focus-within .sidebarMenuLabel {
   opacity: 0.85 !important;
-  height: auto !important;
+  height: 14px !important;
   visibility: visible !important;
 }
 

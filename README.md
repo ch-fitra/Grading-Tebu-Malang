@@ -66,7 +66,13 @@ PostgreSQL is mandatory. The API does not use an in-memory fallback or sample op
 
 ```powershell
 npm run typecheck
+npm test
+npm run test:integration
+npm run test:ai
 npm run build
+npm audit
 ```
+
+Tes integrasi memerlukan PostgreSQL dari `DATABASE_URL` dan memakai schema sementara yang terisolasi. Tes AI memerlukan dependensi Python; aktifkan `.venv` sebelum menjalankannya. Lihat [hasil pemeriksaan bug](docs/BUGFIX_VALIDATION.md).
 
 See [project analysis](docs/PROJECT_ANALYSIS.md), [execution plan](docs/EXECUTION_PLAN.md), and [architecture](docs/architecture.md).

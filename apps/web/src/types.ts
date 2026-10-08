@@ -1,6 +1,7 @@
 export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
 
 export type InferenceResult = {
+  conveyorEmpty?: boolean;
   id: number;
   timestamp: string;
   cameraId: number;
@@ -28,7 +29,7 @@ export type AiModel = {
 
 export type SystemStatus = {
   backend: { status: string };
-  ai: { status: string; model?: { name: string; version: string; available: boolean } };
+  ai: { status: string; model?: { name: string; version: string; available: boolean }; camera_1_live?: boolean; camera_2_live?: boolean; capabilities?: { conveyor_empty?: boolean } };
   database: { status: string };
   websocket: { clients: number };
 };

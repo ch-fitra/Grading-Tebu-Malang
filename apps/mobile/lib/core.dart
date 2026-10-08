@@ -36,7 +36,7 @@ class ApiClient {
             if (body != null) 'Content-Type': 'application/json',
           })
           ..body = body == null ? '' : jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 20));
       final raw = await http.Response.fromStream(response)
           .timeout(const Duration(seconds: 20));
       final decoded = raw.body.isEmpty ? null : jsonDecode(raw.body);
@@ -87,7 +87,7 @@ class ApiClient {
             ),
     );
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
-    final response = await http.Response.fromStream(await client.send(request))
+    final response = await http.Response.fromStream(await client.send(request).timeout(const Duration(minutes: 5)))
         .timeout(const Duration(minutes: 5));
     final decoded = jsonDecode(response.body);
     if (response.statusCode >= 400) {
@@ -138,6 +138,8 @@ class AppState extends ChangeNotifier {
   Timer? poll;
   WebSocket? socket;
   bool _closed = false;
+  int _refreshVersion = 0, _connectionVersion = 0;
+  Timer? _retryTimer;
 
   bool can(String permission) =>
       (user?['permissions'] is List) &&
@@ -197,7 +199,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
-    if (user == null) return;
+    if (user == null || _closed) return;
+    final token = api.token;
+    final version = ++_refreshVersion;
     try {
       final requests = <Future<dynamic>>[
         if (can('dashboard.read')) api.request('GET', '/api/system/status'),
@@ -210,6 +214,7 @@ class AppState extends ChangeNotifier {
         if (can('role.read')) api.request('GET', '/api/roles'),
       ];
       final values = await Future.wait(requests);
+      if (_closed || api.token != token || version != _refreshVersion) return;
       var i = 0;
       if (can('dashboard.read')) status = row(values[i++]);
       if (can('dashboard.read')) latest = row(values[i++]);
@@ -221,15 +226,17 @@ class AppState extends ChangeNotifier {
       if (can('role.read')) roles = rows(values[i++]);
       error = null;
     } on ApiFailure catch (failure) {
+      if (_closed || api.token != token || version != _refreshVersion) return;
       if (failure.status == 401) {
         await logout();
         return;
       }
       error = failure.message;
     } catch (e) {
+      if (_closed || api.token != token || version != _refreshVersion) return;
       error = e.toString();
     }
-    notifyListeners();
+    if (!_closed) notifyListeners();
   }
 
   void _startRealtime() {
@@ -240,26 +247,36 @@ class AppState extends ChangeNotifier {
 
   Future<void> _connectSocket() async {
     if (_closed || api.token == null) return;
+    _retryTimer?.cancel();
+    final version = ++_connectionVersion;
+    final token = api.token!;
+    socket?.close();
+    socket = null;
     try {
       final wsUrl = api.baseUrl.replaceFirst(RegExp(r'^http'), 'ws');
-      socket = await WebSocket.connect(
-        '$wsUrl/ws?token=${Uri.encodeComponent(api.token!)}',
-      );
-      socket!.listen(
-        (_) => refresh(),
-        onDone: _retrySocket,
-        onError: (_) => _retrySocket(),
+      final connected = await WebSocket.connect(
+        '$wsUrl/ws?token=${Uri.encodeComponent(token)}',
+      ).timeout(const Duration(seconds: 20));
+      if (_closed || api.token != token || version != _connectionVersion) {
+        connected.close();
+        return;
+      }
+      socket = connected;
+      connected.listen(
+        (_) { if (version == _connectionVersion) refresh(); },
+        onDone: () => _retrySocket(version),
+        onError: (_) => _retrySocket(version),
       );
     } catch (_) {
-      _retrySocket();
+      _retrySocket(version);
     }
   }
 
-  void _retrySocket() {
+  void _retrySocket(int version) {
+    if (_closed || user == null || version != _connectionVersion) return;
     socket = null;
-    if (!_closed && user != null) {
-      Future.delayed(const Duration(seconds: 10), _connectSocket);
-    }
+    _retryTimer?.cancel();
+    _retryTimer = Timer(const Duration(seconds: 10), _connectSocket);
   }
 
   Future<void> mutate(String method, String path, [Object? body]) async {
@@ -278,6 +295,9 @@ class AppState extends ChangeNotifier {
         0,
       );
     }
+    _connectionVersion++;
+    _refreshVersion++;
+    _retryTimer?.cancel();
     api.baseUrl = normalized;
     await storage.write(key: 'api_url', value: normalized);
     socket?.close();
@@ -295,6 +315,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    _connectionVersion++;
+    _refreshVersion++;
+    _retryTimer?.cancel();
     poll?.cancel();
     socket?.close();
     socket = null;
@@ -309,12 +332,14 @@ class AppState extends ChangeNotifier {
     latest = {};
     status = {};
     await storage.delete(key: 'token');
-    notifyListeners();
+    if (!_closed) notifyListeners();
   }
 
   @override
   void dispose() {
     _closed = true;
+    _connectionVersion++;
+    _retryTimer?.cancel();
     poll?.cancel();
     socket?.close();
     api.close();
