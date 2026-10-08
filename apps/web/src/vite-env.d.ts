@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  sugarcaneDesktop?: Readonly<{ apiBaseUrl: string; websocketUrl: string }>;
+  sugarcaneDesktop?: Readonly<{ apiBaseUrl: string; websocketUrl: string; aiServiceUrl?: string }>;
 }

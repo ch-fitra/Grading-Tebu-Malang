@@ -13,6 +13,10 @@ __pycache__/
 storage/snapshots/*
 storage/logs/*
 storage/export/*
+storage/*.jpg
+storage/*.jpeg
+storage/*.png
 !storage/**/.gitkeep
+!storage/roi_config.json
 models/active/*.onnx
 models/archive/*.onnx

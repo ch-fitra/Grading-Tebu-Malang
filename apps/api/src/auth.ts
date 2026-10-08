@@ -9,10 +9,10 @@ export type User = { id: number; username: string; roleId: number; role: string;
 type InternalUser = User & { passwordHash: string };
 
 const defaults: Omit<Role, "id">[] = [
-  { code: "developer", name: "Developer", description: "Mengelola semua role dan pengguna", permissions: [...PERMISSIONS], system: true },
-  { code: "admin", name: "Admin", description: "Mengelola pengguna operasional", permissions: PERMISSIONS.filter(p => p !== "role.write") as Permission[], system: false },
-  { code: "operator", name: "Operator", description: "Menjalankan inspeksi", permissions: ["dashboard.read", "history.read", "inspection.write", "camera.read", "model.read"], system: false },
-  { code: "viewer", name: "Viewer", description: "Melihat data operasional", permissions: ["dashboard.read", "history.read", "camera.read", "model.read"], system: false }
+  { code: "developer", name: "Developer (Sistem)", description: "Akses penuh platform, sistem AI, dan manajemen multi-pabrik", permissions: [...PERMISSIONS], system: true },
+  { code: "admin", name: "Admin (Direksi / Manajemen)", description: "Akses pemantauan direksi, evaluasi mutu, audit laporan, persetujuan 2FA & kelola akun. Dibatasi dari kontrol scan conveyor.", permissions: PERMISSIONS.filter(p => p !== "role.write") as Permission[], system: false },
+  { code: "operator", name: "Operator (Operasional Lapangan)", description: "Menjalankan pemindaian meja tebu (Start/Stop Scan), CCTV realtime & rekonsiliasi data. Penghapusan frame wajib persetujuan 2FA direksi.", permissions: ["dashboard.read", "history.read", "inspection.write", "camera.read", "model.read"], system: false },
+  { code: "viewer", name: "Viewer (Tamu)", description: "Melihat data operasional dan riwayat", permissions: ["dashboard.read", "history.read", "camera.read", "model.read"], system: false }
 ];
 const roles: Role[] = defaults.map((r, i) => ({ ...r, id: i + 1 }));
 const users: InternalUser[] = [];
@@ -48,13 +48,21 @@ function decode(token: string): { sub: number; exp: number } | null {
   try { const value = JSON.parse(Buffer.from(body, "base64url").toString()); return Number(value.exp) > Date.now() ? value : null; } catch { return null; }
 }
 async function bootstrapUser(username: string, password: string, role: string) {
-  if (!connected || !pool) {
-    if (!users.some(u => u.username === username)) { const r = roles.find(item => item.code === role)!; users.push({ id: nextUserId++, username, passwordHash: hashPassword(password), roleId: r.id, role, permissions: r.permissions, active: true }); }
-    return;
+  const r = roles.find(item => item.code === role) || roles[0];
+  const existingMem = users.find(u => u.username === username);
+  if (!existingMem) {
+    users.push({ id: nextUserId++, username, passwordHash: hashPassword(password), roleId: r.id, role: r.code, permissions: r.permissions, active: true });
+  } else {
+    existingMem.passwordHash = hashPassword(password);
   }
-  const found = await pool.query("SELECT id,password_hash FROM app_users WHERE username=$1", [username]);
-  if (!found.rowCount) await pool.query("INSERT INTO app_users(username,password_hash,role,role_id) VALUES($1,$2,$3::varchar,(SELECT id FROM roles WHERE code=$3::varchar))", [username, hashPassword(password), role]);
-  else if (!String(found.rows[0].password_hash).includes(":")) await pool.query("UPDATE app_users SET password_hash=$2,role=$3,role_id=(SELECT id FROM roles WHERE code=$3) WHERE id=$1", [found.rows[0].id, hashPassword(password), role]);
+  if (!connected || !pool) return;
+  try {
+    const found = await pool.query("SELECT id,password_hash FROM app_users WHERE username=$1", [username]);
+    if (!found.rowCount) await pool.query("INSERT INTO app_users(username,password_hash,role,role_id) VALUES($1,$2,$3::varchar,(SELECT id FROM roles WHERE code=$3::varchar))", [username, hashPassword(password), role]);
+    else if (!String(found.rows[0].password_hash).includes(":")) await pool.query("UPDATE app_users SET password_hash=$2,role=$3,role_id=(SELECT id FROM roles WHERE code=$3) WHERE id=$1", [found.rows[0].id, hashPassword(password), role]);
+  } catch {
+    // Keep in-memory user active if PostgreSQL is temporarily unreachable
+  }
 }
 
 export const auth = {
@@ -64,21 +72,99 @@ export const auth = {
       await pool.query("SELECT 1 FROM roles LIMIT 1");
       connected = true;
     } catch {
-      throw new Error("PostgreSQL atau migrasi RBAC belum siap. Jalankan npm run db:migrate.");
+      // Allow fallback in development if DB is starting up
+      connected = false;
     }
-    await bootstrapUser(process.env.APP_DEVELOPER_USER ?? "developer", process.env.APP_DEVELOPER_PASSWORD ?? "developer", "developer");
-    await bootstrapUser(process.env.APP_ADMIN_USER ?? "admin", process.env.APP_ADMIN_PASSWORD ?? "admin", "admin");
+    const devPass = process.env.APP_DEVELOPER_PASSWORD;
+    const adminPass = process.env.APP_ADMIN_PASSWORD;
+    const trangkilAdminPass = process.env.PASSWORD_TRANGKIL_ADMIN;
+    const trangkilOpPass = process.env.PASSWORD_TRANGKIL_OPERATOR;
+    const kebonagungAdminPass = process.env.PASSWORD_KEBONAGUNG_ADMIN;
+    const kebonagungOpPass = process.env.PASSWORD_KEBONAGUNG_OPERATOR;
+
+    if (devPass) {
+      await bootstrapUser(process.env.APP_DEVELOPER_USER ?? "developer", devPass, "developer");
+    }
+    if (adminPass) {
+      await bootstrapUser(process.env.APP_ADMIN_USER ?? "admin", adminPass, "admin");
+    }
+    if (trangkilAdminPass) {
+      await bootstrapUser(process.env.USER_TRANGKIL_ADMIN ?? "admin_trangkil", trangkilAdminPass, "admin");
+    }
+    if (trangkilOpPass) {
+      await bootstrapUser(process.env.USER_TRANGKIL_OPERATOR ?? "operator_trangkil", trangkilOpPass, "operator");
+    }
+    if (kebonagungAdminPass) {
+      await bootstrapUser(process.env.USER_KEBONAGUNG_ADMIN ?? "admin_kebonagung", kebonagungAdminPass, "admin");
+    }
+    if (kebonagungOpPass) {
+      await bootstrapUser(process.env.USER_KEBONAGUNG_OPERATOR ?? "operator_kebonagung", kebonagungOpPass, "operator");
+    }
   },
   async login(username: string, password: string) {
-    const u = connected && pool ? userRow((await pool.query("SELECT u.*,r.code AS role,r.permissions FROM app_users u JOIN roles r ON r.id=u.role_id WHERE u.username=$1", [username])).rows[0] ?? {}) : users.find(item => item.username === username);
-    if (!u?.active || !matchesPassword(password, u.passwordHash)) return null;
+    let u: InternalUser | undefined;
+    if (connected && pool) {
+      try {
+        const res = await pool.query("SELECT u.*,r.code AS role,r.permissions FROM app_users u JOIN roles r ON r.id=u.role_id WHERE u.username=$1", [username]);
+        if (res.rowCount) u = userRow(res.rows[0]);
+      } catch {
+        u = users.find(item => item.username === username);
+      }
+    } else {
+      u = users.find(item => item.username === username);
+    }
+    if (!u) u = users.find(item => item.username === username);
+    if (!u?.active) return null;
+
+    const valid = matchesPassword(password, u.passwordHash);
+    if (!valid) return null;
     return { token: sign({ sub: u.id, exp: Date.now() + 8 * 60 * 60 * 1000 }), user: publicUser(u) };
+  },
+  async verifyAdmin(factory: string, passwordOrPin: string): Promise<User | null> {
+    if (!passwordOrPin) return null;
+    const allUsers = await auth.listUsers();
+    const admins = allUsers.filter(u =>
+      u.active &&
+      (u.role === "admin" || u.role === "developer") &&
+      (factory === "all" || u.username.toLowerCase().includes(factory.toLowerCase()) || u.role === "developer")
+    );
+    for (const admin of admins) {
+      let hash = users.find(u => u.id === admin.id)?.passwordHash;
+      if (!hash && connected && pool) {
+        try {
+          const res = await pool.query("SELECT password_hash FROM app_users WHERE id=$1", [admin.id]);
+          if (res.rowCount) hash = String(res.rows[0].password_hash);
+        } catch {}
+      }
+      if (hash && matchesPassword(passwordOrPin, hash)) {
+        return admin;
+      }
+    }
+    if (process.env.ADMIN_2FA_PIN && passwordOrPin === process.env.ADMIN_2FA_PIN) {
+      const rootAdmin = admins[0];
+      if (rootAdmin) return rootAdmin;
+    }
+    return null;
   },
   async current(token: string) {
     const payload = decode(token); if (!payload) return null;
-    const u = connected && pool ? userRow((await pool.query("SELECT u.*,r.code AS role,r.permissions FROM app_users u JOIN roles r ON r.id=u.role_id WHERE u.id=$1", [payload.sub])).rows[0] ?? {}) : users.find(item => item.id === payload.sub);
+    let u: InternalUser | undefined;
+    if (connected && pool) {
+      try {
+        const res = await pool.query("SELECT u.*,r.code AS role,r.permissions FROM app_users u JOIN roles r ON r.id=u.role_id WHERE u.id=$1", [payload.sub]);
+        if (res.rowCount) u = userRow(res.rows[0]);
+      } catch {
+        u = users.find(item => item.id === payload.sub);
+      }
+    } else {
+      u = users.find(item => item.id === payload.sub);
+    }
+    if (!u) u = users.find(item => item.id === payload.sub);
     if (!u?.active) return null;
-    if (!connected) { const role = roles.find(r => r.id === u.roleId); if (!role) return null; u.permissions = role.permissions; u.role = role.code; }
+    if (!connected || !u.permissions) {
+      const role = roles.find(r => r.id === u.roleId || r.code === u.role);
+      if (role) { u.permissions = role.permissions; u.role = role.code; }
+    }
     return publicUser(u);
   },
   async listRoles() { return connected && pool ? (await pool.query("SELECT * FROM roles ORDER BY id")).rows.map(roleRow) : roles; },

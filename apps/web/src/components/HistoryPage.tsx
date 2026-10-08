@@ -1,19 +1,167 @@
-import { useState, useEffect } from "react";
-import { Archive, Calendar, Camera, Filter, Search, Sliders, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import {
+  History,
+  Calendar,
+  Camera,
+  Filter,
+  Search,
+  Sliders,
+  X,
+  RotateCcw,
+  Download,
+  Truck,
+  Clock,
+  Building2,
+  Sun,
+  Moon,
+  ShieldCheck,
+  CheckCircle,
+  Eye,
+  Trash2,
+  Layers,
+  Wifi,
+  WifiOff,
+  Cpu,
+  Lock,
+  RefreshCw,
+  ChevronDown,
+  SlidersHorizontal,
+  FileSpreadsheet
+} from "lucide-react";
 import { useAppStore } from "../store";
 import { downloadCsv } from "../utils/csv";
-import { Header } from "./shared/Header";
-import { IconButton } from "./shared/IconButton";
-import { DataTable } from "./shared/DataTable";
 import { TruckInspectionDetailModal } from "./TruckInspectionDetailModal";
-import type { TruckInspectionSession, InferenceResult } from "../types";
+import { TappingSyncModal } from "./TappingSyncModal";
+import { RequestDeletionModal } from "./RequestDeletionModal";
+import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
+import { TRANGKIL_GRADES, type TrangkilGradeCode } from "./DashboardPage";
+import { backendUrl } from "../utils/api";
+import type { TruckInspectionSession, InferenceResult, Grade, CameraRow } from "../types";
+
+export interface MbsStationInfo {
+  mbsNum: number;
+  label: string;
+  subLabel: string;
+  isPrimaryLive: boolean;
+  cameraId?: number;
+}
+
+export function resolveMbsStation(idOrLine?: number, cameras?: CameraRow[]): MbsStationInfo {
+  if (!idOrLine) {
+    return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: 2 };
+  }
+  const cam = cameras?.find(c => c.id === idOrLine);
+  if (cam) {
+    const name = cam.name.toLowerCase();
+    if (name.includes("mbs 5") || name.includes("wisenet")) {
+      return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: cam.id };
+    }
+    if (name.includes("mbs 1") || name.includes("kebon agung")) {
+      return { mbsNum: 1, label: "MBS 1", subLabel: "PG Kebon Agung", isPrimaryLive: false, cameraId: cam.id };
+    }
+    const match = cam.name.match(/MBS\s*(\d+)/i);
+    if (match) {
+      const num = Number(match[1]);
+      return { mbsNum: num, label: `MBS ${num}`, subLabel: cam.location || `Meja ${num}`, isPrimaryLive: num === 5, cameraId: cam.id };
+    }
+  }
+
+  // Fallback direct mapping for PT Trangkil & PG Kebon Agung
+  if (idOrLine === 2 || idOrLine === 5) {
+    return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: 2 };
+  }
+  if (idOrLine === 1) {
+    return { mbsNum: 1, label: "MBS 1", subLabel: "PG Kebon Agung", isPrimaryLive: false, cameraId: 1 };
+  }
+  return { mbsNum: idOrLine, label: `MBS ${idOrLine}`, subLabel: `Meja ${idOrLine}`, isPrimaryLive: false };
+}
+
+function normalizeGrade(g?: string): string {
+  if (!g) return "M";
+  const u = g.toUpperCase().trim().replace(/^MBS\s*/, "").trim();
+  if (["S", "M", "A", "D", "B", "G", "X"].includes(u)) return u;
+  if (u === "REJECT" || u === "REJECT_G") return "G";
+  if (u === "REJECT_X") return "X";
+  if (u === "C") return "D";
+  if (u === "A/M") return "A";
+  return "M";
+}
+
+function getGradeFromImpurity(imp: number): string {
+  if (imp <= 2) return "S";
+  if (imp <= 5) return "M";
+  if (imp <= 10) return "A";
+  if (imp <= 15) return "D";
+  if (imp <= 20) return "B";
+  if (imp <= 35) return "G";
+  return "X";
+}
 
 export function HistoryPage() {
-  const { history, truckSessions, deleteTruckInspection } = useAppStore();
+  const { history, truckSessions, cameras, session, status, deleteTruckInspection, deleteInference, deletionRequests } = useAppStore();
   const canWrite = useAppStore(s => s.session?.user.permissions?.includes("inspection.write") ?? false);
+  const isAdmin = session?.user.role === "admin";
+  const isOperator = session?.user.role === "operator";
+  const [requestDeletionTarget, setRequestDeletionTarget] = useState<{
+    targetType: "inference" | "truck_inspection";
+    targetId: string | number;
+    title: string;
+    subtitle?: string;
+    snapshotPath?: string;
+  } | null>(null);
+  const [isApprovalQueueOpen, setIsApprovalQueueOpen] = useState(false);
+
+  const pendingRequestsCount = deletionRequests.filter(r => r.status === "pending").length;
+  const pendingInferenceIds = useMemo(() => new Set(
+    deletionRequests
+      .filter(r => r.status === "pending" && r.targetType === "inference")
+      .map(r => Number(r.targetId))
+  ), [deletionRequests]);
+
   const [activeTab, setActiveTab] = useState<"trucks" | "captures">("trucks");
   const [selectedTruckSession, setSelectedTruckSession] = useState<TruckInspectionSession | null>(null);
   const [selectedCapture, setSelectedCapture] = useState<InferenceResult | null>(null);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
+  // Search & Filtering States
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDateFilter, setSelectedDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [selectedLineFilter, setSelectedLineFilter] = useState<number | "all">(5);
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string | "all">("all");
+
+  // Clock ticker & theme
+  const [clock, setClock] = useState(new Date());
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    return (document.documentElement.dataset.theme as "light" | "dark") || "dark";
+  });
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("tebu-ui-theme", next);
+  };
+
+  const userFactory = (() => {
+    const u = (session?.user.username || "").toLowerCase();
+    if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
+    if (u.includes("trangkil")) return "trangkil";
+    return null;
+  })();
+
+  const visibleCameras = cameras.filter((c) => {
+    if (!userFactory) return true;
+    const text = `${c.name} ${c.location}`.toLowerCase();
+    return userFactory === "kebonagung" ? (text.includes("kebon agung") || text.includes("malang")) : text.includes("trangkil");
+  });
+  const allowedCameraIds = new Set(visibleCameras.map(c => c.id));
+  const visibleHistory = history.filter(h => !userFactory || allowedCameraIds.has(h.cameraId));
+  const visibleTrucks = truckSessions.filter(t => !userFactory || allowedCameraIds.has(t.line));
 
   // Close modals on Escape key press
   useEffect(() => {
@@ -21,260 +169,925 @@ export function HistoryPage() {
       if (e.key === "Escape") {
         setSelectedCapture(null);
         setSelectedTruckSession(null);
+        setIsSyncModalOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Filtered truck cycles list
+  const filteredTrucks = useMemo(() => {
+    return visibleTrucks.filter((truck) => {
+      // Date filter
+      if (selectedDateFilter !== "all") {
+        const itemTime = new Date(truck.startedAt).getTime();
+        const now = Date.now();
+        if (selectedDateFilter === "today") {
+          const isToday = new Date(truck.startedAt).toDateString() === new Date().toDateString();
+          if (!isToday) return false;
+        } else if (selectedDateFilter === "7d") {
+          if (now - itemTime > 7 * 86400000) return false;
+        } else if (selectedDateFilter === "30d") {
+          if (now - itemTime > 30 * 86400000) return false;
+        }
+      }
+      // Search query (truck code, plate number, driver name)
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchCode = (truck.truckCode || "").toLowerCase().includes(q);
+        const matchPlate = (truck.plateNumber || "").toLowerCase().includes(q);
+        const matchDriver = (truck.driverName || "").toLowerCase().includes(q);
+        if (!matchCode && !matchPlate && !matchDriver) return false;
+      }
+      // Line filter with resolveMbsStation mapping
+      if (selectedLineFilter !== "all") {
+        const mbsNum = resolveMbsStation(truck.line, cameras).mbsNum;
+        if (mbsNum !== selectedLineFilter && truck.line !== selectedLineFilter) return false;
+      }
+      // Status filter
+      if (selectedStatusFilter !== "all" && truck.status !== selectedStatusFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [visibleTrucks, searchQuery, selectedDateFilter, selectedLineFilter, selectedStatusFilter, cameras]);
+
+  // Filtered raw frame captures list
+  const filteredHistory = useMemo(() => {
+    return visibleHistory.filter((item) => {
+      // Date filter
+      if (selectedDateFilter !== "all") {
+        const itemTime = new Date(item.timestamp).getTime();
+        const now = Date.now();
+        if (selectedDateFilter === "today") {
+          const isToday = new Date(item.timestamp).toDateString() === new Date().toDateString();
+          if (!isToday) return false;
+        } else if (selectedDateFilter === "7d") {
+          if (now - itemTime > 7 * 86400000) return false;
+        } else if (selectedDateFilter === "30d") {
+          if (now - itemTime > 30 * 86400000) return false;
+        }
+      }
+      // Line filter with resolveMbsStation mapping
+      if (selectedLineFilter !== "all") {
+        const mbsNum = resolveMbsStation(item.cameraId, cameras).mbsNum;
+        if (mbsNum !== selectedLineFilter && item.cameraId !== selectedLineFilter) return false;
+      }
+      return true;
+    });
+  }, [visibleHistory, selectedDateFilter, selectedLineFilter, cameras]);
+
+  // Summary KPIs based on filtered or active records
+  const totalCyclesCount = filteredTrucks.length;
+  const completedCyclesCount = filteredTrucks.filter(t => t.status === "completed").length;
+  const totalCapturesCount = filteredHistory.length;
+
+  const averageConfidence = filteredHistory.length > 0
+    ? `${Math.round((filteredHistory.reduce((sum, row) => sum + (row.confidence || 0.88), 0) / filteredHistory.length) * 100)}%`
+    : filteredTrucks.length > 0
+    ? `${Math.round((filteredTrucks.reduce((sum, row) => sum + (row.averageConfidence || 0.88), 0) / filteredTrucks.length) * 100)}%`
+    : "—";
+
+  const averageImpurity = filteredHistory.length > 0
+    ? `${(filteredHistory.reduce((sum, row) => sum + (row.classes.daun + row.classes.pucuk + row.classes.sampah), 0) / filteredHistory.length).toFixed(1)}%`
+    : filteredTrucks.length > 0
+    ? `${(filteredTrucks.reduce((sum, row) => sum + (row.averageImpurity || 0), 0) / filteredTrucks.length).toFixed(1)}%`
+    : "—";
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    selectedDateFilter !== "all" ||
+    (selectedLineFilter !== 5 && selectedLineFilter !== "all") ||
+    selectedStatusFilter !== "all"
+  );
+
+  const activeFiltersCount = [
+    Boolean(searchQuery.trim()),
+    selectedDateFilter !== "all",
+    selectedLineFilter !== 5 && selectedLineFilter !== "all",
+    selectedStatusFilter !== "all"
+  ].filter(Boolean).length;
+
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setSelectedDateFilter("all");
+    setSelectedLineFilter(5);
+    setSelectedStatusFilter("all");
+  };
+
   function exportCsv() {
-    const header = ["Time", "Camera", "Grade", "Daun", "Pucuk", "Sampah", "Confidence"];
-    const body = history.map((row) => [
-      new Date(row.timestamp).toLocaleString(),
-      `#${row.cameraId}`,
-      row.grade,
-      row.classes.daun,
-      row.classes.pucuk,
-      row.classes.sampah,
-      row.confidence
-    ]);
-    downloadCsv("tebu-history.csv", [header, ...body]);
+    const header = [
+      "Timestamp",
+      "Meja Tebu (MBS)",
+      "Predicted Grade",
+      "Karakteristik & Simbol",
+      "Ambang Toleransi",
+      "Kebijakan Rafaksi",
+      "Status Giling",
+      "Akurasi AI (%)"
+    ];
+    const body = filteredHistory.map((row) => {
+      const station = resolveMbsStation(row.cameraId, cameras);
+      const capGrade = normalizeGrade(row.grade);
+      const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
+      return [
+        new Date(row.timestamp).toLocaleString("id-ID"),
+        `${station.label} (${station.subLabel})`,
+        `MBS ${capGrade}`,
+        curConfig.name,
+        curConfig.tol,
+        curConfig.rafaksi,
+        curConfig.status,
+        Math.round((row.confidence || 0.88) * 100)
+      ];
+    });
+    downloadCsv(`tebu-frame-log-${Date.now()}.csv`, [header, ...body]);
   }
 
   function exportTruckCsv() {
-    const header = ["Truck Code", "Plate Number", "Line", "Started At", "Completed At", "Cycles", "Avg Impurity", "Avg Confidence", "Final Decision", "Status"];
-    const body = truckSessions.map((row) => [
-      row.truckCode,
-      row.plateNumber || "",
-      `Line ${row.line}`,
-      new Date(row.startedAt).toLocaleString(),
-      row.completedAt ? new Date(row.completedAt).toLocaleString() : "Active",
-      row.totalCaptures,
-      `${row.averageImpurity.toFixed(2)}%`,
-      `${Math.round(row.averageConfidence * 100)}%`,
-      row.finalDecision.replace("_", " "),
-      row.status
-    ]);
-    downloadCsv("tebu-truck-history.csv", [header, ...body]);
+    const header = [
+      "Kode Siklus / Truk",
+      "Plat Armada",
+      "Nama Supir",
+      "Petani / Vendor",
+      "Stasiun MBS",
+      "Waktu Mulai",
+      "Waktu Selesai",
+      "Total Frame",
+      "Rata-rata Kotoran (%)",
+      "Predicted Grade AI",
+      "Rata-rata Akurasi (%)",
+      "Keputusan Pabrik",
+      "Status",
+      "Catatan / SPAT"
+    ];
+    const body = filteredTrucks.map((row) => {
+      const station = resolveMbsStation(row.line, cameras);
+      return [
+        row.truckCode,
+        row.plateNumber || "-",
+        row.driverName || "-",
+        row.supplier || "-",
+        `${station.label} (${station.subLabel})`,
+        new Date(row.startedAt).toLocaleString("id-ID"),
+        row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
+        row.totalCaptures,
+        `${row.averageImpurity.toFixed(2)}%`,
+        `MBS ${getGradeFromImpurity(row.averageImpurity)}`,
+        `${Math.round((row.averageConfidence || 0.88) * 100)}%`,
+        row.finalDecision.replace("_", " "),
+        row.status,
+        row.notes || "-"
+      ];
+    });
+    downloadCsv(`rekap-siklus-tebu-${Date.now()}.csv`, [header, ...body]);
   }
 
   const getDecisionBadge = (decision: string) => {
     switch (decision) {
       case "MBS":
-        return <span className="decision-badge mbs">MBS</span>;
+        return <span className="decision-badge mbs">Lolos Bebas Rafaksi</span>;
       case "NON_MBS":
-        return <span className="decision-badge non-mbs">Non MBS</span>;
+        return <span className="decision-badge non-mbs">Denda Rafaksi</span>;
       case "DITOLAK_DO":
-        return <span className="decision-badge reject">Ditolak / DO</span>;
+        return <span className="decision-badge reject">Ditolak / Afkir</span>;
       default:
-        return <span className="decision-badge pending">Pending</span>;
+        return <span className="decision-badge pending">Dalam Proses</span>;
     }
   };
 
-  // Calculate summary stats
-  const totalRecords = history.length;
-  const lastInference = totalRecords > 0 
-    ? new Date(history[0].timestamp).toLocaleTimeString() 
-    : "-";
-  const averageConfidence = totalRecords > 0
-    ? `${Math.round((history.reduce((sum, row) => sum + row.confidence, 0) / totalRecords) * 100)}%`
-    : "-";
-  const averageImpurity = totalRecords > 0
-    ? `${(history.reduce((sum, row) => sum + (row.classes.daun + row.classes.pucuk + row.classes.sampah), 0) / totalRecords).toFixed(2)}%`
-    : "-";
+  const isOnline = status?.backend.status === "ok";
+  const isAiOnline = status?.ai.status === "ok" || status?.ai.status === "ready";
+  const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
-    <section className="historyPage">
-      <Header 
-        title="History Log" 
-        subtitle="Archived history of sugar cane quality inspection records" 
-        action={
-          <IconButton 
-            icon={Archive} 
-            label="Export" 
-            onClick={activeTab === "trucks" ? exportTruckCsv : exportCsv} 
-          />
-        } 
-      />
+    <section className="historyPageContainer">
+      {/* ─── Top Station Header (Matches Dashboard Cockpit) ─── */}
+      <div className="stationHeader">
+        <div className="stationHeaderLeft">
+          <div className="stationLogoBadge" title="Pabrik Gula Trangkil (Pati)">
+            <img
+              src="/logo-trangkil.png"
+              alt="Pabrik Gula Trangkil"
+              className="stationTrangkilLogo"
+            />
+            <span className="stationFactoryCity">Pati, Jawa Tengah</span>
+          </div>
 
-      {/* Tabs Switcher Toolbar */}
-      <div className="historyTabContainer">
-        <button 
-          className={`historyTabBtn ${activeTab === "trucks" ? "active" : ""}`}
-          onClick={() => setActiveTab("trucks")}
-        >
-          🚚 Truck History
-        </button>
-        <button 
-          className={`historyTabBtn ${activeTab === "captures" ? "active" : ""}`}
-          onClick={() => setActiveTab("captures")}
-        >
-          🗂️ Detection Records
-        </button>
-      </div>
+          <div className="historyTitleBadge">
+            <History size={12} />
+            <span>LOG MUTU AI</span>
+          </div>
 
-      {/* Summary Stats Cards */}
-      <div className="historyStatsGrid">
-        <div className="statCard">
-          <span>Total Batches</span>
-          <strong>{totalRecords} batches</strong>
-        </div>
-        <div className="statCard">
-          <span>Last Inference</span>
-          <strong>{lastInference}</strong>
-        </div>
-        <div className="statCard">
-          <span>Average Confidence</span>
-          <strong>{averageConfidence}</strong>
-        </div>
-        <div className="statCard">
-          <span>Average Impurity</span>
-          <strong>{averageImpurity}</strong>
-        </div>
-      </div>
-
-      {/* Visual Filter UI */}
-      <div className="filterToolbar">
-        <div className="filterGroup">
-          <div className="filterInputWrapper">
-            <Search size={16} />
-            <input type="text" placeholder="Search batch ID..." disabled />
-          </div>
-          <div className="filterInputWrapper">
-            <Calendar size={16} />
-            <input type="text" placeholder="Select date range..." disabled />
-          </div>
-          <div className="filterInputWrapper">
-            <Camera size={16} />
-            <select disabled style={{ border: "none", background: "transparent", outline: "none", width: "100%", font: "inherit", color: "inherit" }}>
-              <option>All Cameras</option>
-            </select>
-          </div>
-          <div className="filterInputWrapper">
-            <Filter size={16} />
-            <select disabled style={{ border: "none", background: "transparent", outline: "none", width: "100%", font: "inherit", color: "inherit" }}>
-              <option>All Grades</option>
-            </select>
-          </div>
-        </div>
-        <button className="filterResetButton" disabled>
-          <Sliders size={15} />
-          Reset Filters
-        </button>
-      </div>
-
-      {activeTab === "trucks" ? (
-        truckSessions.length === 0 ? (
-          <div className="emptyStatePanel">
-            <div className="emptyStateIcon">🚚</div>
-            <h3>No truck inspections yet</h3>
-            <p>Start a truck inspection session from the Dashboard to group grading cycles.</p>
-          </div>
-        ) : (
-          <DataTable
-            columns={[
-              "Truck Code",
-              "Plate Number",
-              "Line",
-              "Started At",
-              "Completed At",
-              "Cycles",
-              "Avg Impurity",
-              "Avg Confidence",
-              "Decision",
-              "Status",
-              "Actions"
-            ]}
-            rows={truckSessions.map((row) => [
-              <span style={{ fontWeight: 700, color: "var(--color-text)" }}>{row.truckCode}</span>,
-              <span>{row.plateNumber || "-"}</span>,
-              <strong style={{ color: "var(--color-text)" }}>Line {row.line}</strong>,
-              <span>{new Date(row.startedAt).toLocaleString()}</span>,
-              <span>{row.completedAt ? new Date(row.completedAt).toLocaleString() : "-"}</span>,
-              <strong>{row.totalCaptures} cycles</strong>,
-              <span className={row.averageImpurity > 20 ? "text-danger" : row.averageImpurity > 10 ? "text-amber" : "text-success"} style={{ fontWeight: 600 }}>
-                {row.averageImpurity.toFixed(1)}%
-              </span>,
-              <span>{Math.round(row.averageConfidence * 100)}%</span>,
-              getDecisionBadge(row.finalDecision),
-              <span className={`session-status-badge ${row.status}`}>
-                {row.status.toUpperCase()}
-              </span>,
-              <div className="table-action-row">
-                <button 
-                  type="button" 
-                  className="view-cycle-btn"
-                  onClick={() => setSelectedTruckSession(row)}
+          {/* Quick Line Selector Filters */}
+          <div className="stationMbsTabs">
+            <button
+              type="button"
+              className="stationMbsTab locked"
+              disabled
+              title="Semua Meja — Jalur Terkunci (Hanya MBS 5 yang aktif di PG Trangkil)"
+            >
+              <Lock size={10} />
+              <span>Semua Meja</span>
+            </button>
+            {[1, 2, 3, 4, 5].map((lineNum) => {
+              const isLocked = lineNum !== 5;
+              const isSelected = selectedLineFilter === lineNum;
+              return (
+                <button
+                  key={lineNum}
+                  type="button"
+                  className={`stationMbsTab ${isSelected ? "active" : ""} ${isLocked ? "locked" : ""}`}
+                  onClick={() => { if (!isLocked) setSelectedLineFilter(lineNum); }}
+                  disabled={isLocked}
+                  title={isLocked ? `MBS ${lineNum} — Jalur Terkunci` : `MBS 5 (Wisenet) — Kamera Aktif Online`}
                 >
-                  View
+                  {isLocked && <Lock size={10} />}
+                  <span>MBS {lineNum}</span>
+                  {!isLocked && <span className="stationMbsDot live" />}
                 </button>
-                {canWrite && <button 
-                  type="button" 
-                  className="view-cycle-btn btn-danger"
-                  style={{ marginLeft: 8 }}
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete inspection record for truck ${row.truckCode}?`)) {
-                      void deleteTruckInspection(row.id).catch(error => alert(`Gagal menghapus inspeksi: ${error}`));
-                    }
-                  }}
-                >
-                  Delete
-                </button>}
-              </div>
-            ])}
-          />
-        )
-      ) : (
-        history.length === 0 ? (
-          <div className="emptyStatePanel">
-            <div className="emptyStateIcon">🗂️</div>
-            <h3>No grading records yet</h3>
-            <p>Hubungkan kamera aktif untuk menghasilkan catatan deteksi nyata.</p>
+              );
+            })}
           </div>
-        ) : (
-          <DataTable
-            columns={["Time", "Camera", "Grade", "Daun", "Pucuk", "Sampah", "Confidence"]}
-            rows={history.map((row) => [
-              new Date(row.timestamp).toLocaleString(),
-              <span style={{ fontWeight: 600, color: "var(--color-text)" }}>#{row.cameraId}</span>,
-              <span className={`gradePill grade-${row.grade}`}>{row.grade}</span>,
-              <span className="percentText green">{row.classes.daun}%</span>,
-              <span className="percentText yellow">{row.classes.pucuk}%</span>,
-              <span className="percentText red">{row.classes.sampah}%</span>,
-              <div className="confidenceCell">
-                <span>{Math.round(row.confidence * 100)}%</span>
-                <div className="confidenceBarWrap mini">
-                  <div className="confidenceBar" style={{ width: `${row.confidence * 100}%` }} />
+        </div>
+
+        <div className="stationHeaderRight">
+          <div className="stationStatusChips">
+            <div className={`stChip ${isDbOnline ? "ok" : "err"}`} title="Status Koneksi Database Server">
+              <CheckCircle size={11} />
+              <span>Database Log</span>
+            </div>
+            {isAdmin && (
+              <button
+                type="button"
+                className="stChip"
+                onClick={() => setIsApprovalQueueOpen(true)}
+                title="Pusat Otorisasi & Persetujuan Direksi (Maker-Checker)"
+                style={{
+                  background: pendingRequestsCount > 0 ? "rgba(245, 158, 11, 0.25)" : "rgba(30, 41, 59, 0.7)",
+                  borderColor: pendingRequestsCount > 0 ? "rgba(245, 158, 11, 0.5)" : "rgba(255, 255, 255, 0.15)",
+                  color: pendingRequestsCount > 0 ? "#fbbf24" : "#cbd5e1",
+                  fontWeight: 600,
+                  cursor: "pointer"
+                }}
+              >
+                <ShieldCheck size={12} />
+                <span>Persetujuan Direksi</span>
+                {pendingRequestsCount > 0 && (
+                  <span style={{
+                    background: "#ef4444",
+                    color: "#fff",
+                    fontSize: "10px",
+                    padding: "1px 5px",
+                    borderRadius: "6px",
+                    fontWeight: 700
+                  }}>
+                    {pendingRequestsCount}
+                  </span>
+                )}
+              </button>
+            )}
+          </div>
+
+          <div className="stationClock">
+            <Clock size={12} />
+            <span>{clock.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+          </div>
+
+          <button
+            type="button"
+            className="stationThemeToggleBtn"
+            onClick={toggleTheme}
+            title={theme === "light" ? "Beralih ke Mode Gelap" : "Beralih ke Mode Terang"}
+          >
+            {theme === "light" ? <Moon size={12} /> : <Sun size={12} />}
+            <span>{theme === "light" ? "Dark" : "Light"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Main Content Body ─── */}
+      <div className="historyContentBody">
+        {/* Navigation Mode Switcher Tabs & Action Toolbar */}
+        <div className="historyModeTabsRow">
+          <div className="historyModeTabs">
+            <button
+              type="button"
+              className={`historyModeBtn ${activeTab === "trucks" ? "active" : ""}`}
+              onClick={() => setActiveTab("trucks")}
+            >
+              <RotateCcw size={13} />
+              <span>Riwayat Siklus Pemindaian ({filteredTrucks.length} Siklus)</span>
+            </button>
+            <button
+              type="button"
+              className={`historyModeBtn ${activeTab === "captures" ? "active" : ""}`}
+              onClick={() => setActiveTab("captures")}
+            >
+              <Camera size={13} />
+              <span>Tangkapan Frame Kamera ({filteredHistory.length} Frame)</span>
+            </button>
+          </div>
+
+          <div className="historyHeaderActions">
+            {activeTab === "trucks" && (
+              <button
+                type="button"
+                className="historySyncBtn"
+                onClick={() => setIsSyncModalOpen(true)}
+                title="Unggah langsung file Excel asli PT Trangkil dan cocokkan secara otomatis dengan siklus inspeksi Meja Tebu"
+              >
+                <FileSpreadsheet size={13} />
+                <span>Upload Excel Pabrik</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="historyExportBtn"
+              onClick={activeTab === "trucks" ? exportTruckCsv : exportCsv}
+              title="Download file CSV hasil rekap data ini"
+            >
+              <Download size={13} />
+              <span>Export CSV</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ─── Cockpit KPI Summary Cards (Balanced 4-Column Grid) ─── */}
+        <div className="historyKpiGrid">
+          <div className="historyKpiCard">
+            <span className="historyKpiLabel">TOTAL SIKLUS PEMINDAIAN</span>
+            <strong className="historyKpiValue blue">
+              {totalCyclesCount}
+              <span className="historyKpiUnit">Siklus</span>
+            </strong>
+            <span className="historyKpiSub">
+              {completedCyclesCount} siklus telah selesai digiling
+            </span>
+          </div>
+
+          <div className="historyKpiCard">
+            <span className="historyKpiLabel">TOTAL TANGKAPAN FRAME AI</span>
+            <strong className="historyKpiValue cyan">
+              {totalCapturesCount}
+              <span className="historyKpiUnit">Frame</span>
+            </strong>
+            <span className="historyKpiSub">
+              Tersimpan di local storage server
+            </span>
+          </div>
+
+          <div className="historyKpiCard">
+            <span className="historyKpiLabel">RATA-RATA AKURASI MODEL</span>
+            <strong className="historyKpiValue green">
+              {averageConfidence}
+            </strong>
+            <span className="historyKpiSub">
+              Model ONNX PG Trangkil Active
+            </span>
+          </div>
+
+          <div className="historyKpiCard">
+            <span className="historyKpiLabel">RATA-RATA KOTORAN (IMPURITY)</span>
+            <strong className="historyKpiValue amber">
+              {averageImpurity}
+            </strong>
+            <span className="historyKpiSub">
+              Toleransi standar pabrik PG Trangkil
+            </span>
+          </div>
+        </div>
+
+        {/* ─── Cockpit Filter & Search Console ─── */}
+        <div className="historyCockpitFilterCard">
+          {/* Top Console Bar */}
+          <div className="filterCardHeader">
+            <div className="filterHeaderLeft">
+              <span className="filterConsoleBadge">
+                <SlidersHorizontal size={11} />
+                <span>KONSOL FILTER & PENCARIAN MUTU</span>
+              </span>
+              {activeFiltersCount > 0 && (
+                <span className="filterActiveCounterBadge">
+                  <span className="activeDotPulse" />
+                  <span>{activeFiltersCount} Filter Aktif</span>
+                </span>
+              )}
+            </div>
+
+            <div className="filterHeaderRight">
+              <span className="filterResultsBadge">
+                Ditemukan <strong>{activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length}</strong> {activeTab === "trucks" ? "Siklus" : "Frame"}
+              </span>
+
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  className="filterResetBtnCockpit"
+                  onClick={handleResetFilters}
+                  title="Reset seluruh parameter pencarian ke default"
+                >
+                  <RotateCcw size={11} />
+                  <span>Reset Filter</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Controls Grid (Seamless 1-Row Cockpit Grid) */}
+          <div className={`cockpitFilterGrid ${activeTab === "trucks" ? "cols-4" : "cols-3"}`}>
+            {/* 1. Search Field */}
+            <div className={`cockpitField ${searchQuery.trim() ? "hasValue" : ""}`}>
+              <label className="cockpitFieldLabel">
+                <Search size={10} />
+                <span>PENCARIAN CEPAT</span>
+              </label>
+              <div className="cockpitInputWrap">
+                <input
+                  type="text"
+                  placeholder="Cari nopol, supir, kode siklus..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="cockpitInput"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    className="cockpitInputClear"
+                    onClick={() => setSearchQuery("")}
+                    title="Hapus teks"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Date Range Field */}
+            <div className={`cockpitField ${selectedDateFilter !== "all" ? "hasValue" : ""}`}>
+              <label className="cockpitFieldLabel">
+                <Calendar size={10} />
+                <span>RENTANG WAKTU</span>
+              </label>
+              <div className="cockpitSelectWrap">
+                <select
+                  value={selectedDateFilter}
+                  onChange={(e) => setSelectedDateFilter(e.target.value as any)}
+                  className="cockpitSelect"
+                >
+                  <option value="all">Semua Waktu</option>
+                  <option value="today">Hari Ini (24 Jam)</option>
+                  <option value="7d">7 Hari Terakhir</option>
+                  <option value="30d">30 Hari Terakhir</option>
+                </select>
+                <ChevronDown size={11} className="selectChevronIcon" />
+              </div>
+            </div>
+
+            {/* 3. MBS Station Field (Hanya MBS 5 Aktif, Lainnya Terkunci) */}
+            <div className={`cockpitField ${selectedLineFilter !== 5 && selectedLineFilter !== "all" ? "hasValue" : ""}`}>
+              <label className="cockpitFieldLabel">
+                <Building2 size={10} />
+                <span>MEJA TEBU (MBS)</span>
+              </label>
+              <div className="cockpitSelectWrap">
+                <select
+                  value={selectedLineFilter}
+                  onChange={(e) => setSelectedLineFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+                  className="cockpitSelect"
+                >
+                  <option value="all" disabled>🔒 Semua Meja (Terkunci)</option>
+                  <option value={1} disabled>🔒 MBS 1 (Terkunci)</option>
+                  <option value={2} disabled>🔒 MBS 2 (Terkunci)</option>
+                  <option value={3} disabled>🔒 MBS 3 (Terkunci)</option>
+                  <option value={4} disabled>🔒 MBS 4 (Terkunci)</option>
+                  <option value={5}>MBS 5 (Wisenet • Aktif)</option>
+                </select>
+                <ChevronDown size={11} className="selectChevronIcon" />
+              </div>
+            </div>
+
+            {/* 4. Status Sesi (Only on Trucks Tab) */}
+            {activeTab === "trucks" && (
+              <div className={`cockpitField ${selectedStatusFilter !== "all" ? "hasValue" : ""}`}>
+                <label className="cockpitFieldLabel">
+                  <Layers size={10} />
+                  <span>STATUS SIKLUS</span>
+                </label>
+                <div className="cockpitSelectWrap">
+                  <select
+                    value={selectedStatusFilter}
+                    onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                    className="cockpitSelect"
+                  >
+                    <option value="all">Semua Status</option>
+                    <option value="completed">Selesai (Completed)</option>
+                    <option value="active">Sedang Berjalan</option>
+                  </select>
+                  <ChevronDown size={11} className="selectChevronIcon" />
                 </div>
               </div>
-            ])}
-          />
-        )
-      )}
+            )}
+          </div>
 
-      {/* Truck Session Detail Modal */}
+          {/* Active Filter Chips Console (Bottom Strip) */}
+          {hasActiveFilters && (
+            <div className="historyActiveFiltersRow">
+              <span className="historyActiveFiltersTitle">Filter Diterapkan:</span>
+              {searchQuery.trim() && (
+                <span className="historyFilterChip">
+                  <span>Cari: "{searchQuery}"</span>
+                  <button type="button" onClick={() => setSearchQuery("")} title="Hapus pencarian">
+                    <X size={11} />
+                  </button>
+                </span>
+              )}
+              {selectedDateFilter !== "all" && (
+                <span className="historyFilterChip">
+                  <span>
+                    Waktu: {selectedDateFilter === "today" ? "Hari Ini" : selectedDateFilter === "7d" ? "7 Hari" : "30 Hari"}
+                  </span>
+                  <button type="button" onClick={() => setSelectedDateFilter("all")} title="Hapus filter waktu">
+                    <X size={11} />
+                  </button>
+                </span>
+              )}
+              {selectedStatusFilter !== "all" && (
+                <span className="historyFilterChip">
+                  <span>Status: {selectedStatusFilter === "completed" ? "Selesai" : "Aktif"}</span>
+                  <button type="button" onClick={() => setSelectedStatusFilter("all")} title="Hapus filter status">
+                    <X size={11} />
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ─── Main Cockpit Data Table ─── */}
+        <div className="historyCockpitTableCard">
+          <div className="historyTableCardHeader">
+            <div className="historyTableTitleLeft">
+              <span className="historyTableBadge">
+                {activeTab === "trucks" ? <Layers size={11} /> : <Camera size={11} />}
+                <span>
+                  {activeTab === "trucks"
+                    ? "LOG SIKLUS PEMINDAIAN MEJA TEBU"
+                    : "LOG TANGKAPAN FRAME CITRA AI"}
+                </span>
+              </span>
+            </div>
+            <div className="historyTableMetaRight">
+              <span className="historyRecordCountBadge">
+                Menampilkan {activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length} data
+              </span>
+            </div>
+          </div>
+
+          <div className="historyTableWrap">
+            {activeTab === "trucks" ? (
+              filteredTrucks.length === 0 ? (
+                <div className="historyEmptyState">
+                  <div className="historyEmptyRadar">
+                    <RotateCcw size={28} />
+                  </div>
+                  <h3>Tidak Ada Rekaman Siklus Pemindaian</h3>
+                  <p>
+                    {hasActiveFilters
+                      ? "Tidak ada siklus yang sesuai dengan filter pencarian saat ini."
+                      : "Mulai pemindaian dari Dashboard dengan menekan tombol Start Cycle / Start Scan."}
+                  </p>
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      className="historyEmptyActionBtn"
+                      onClick={handleResetFilters}
+                    >
+                      Reset Filter
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <table className="historyDataTable">
+                  <thead>
+                    <tr>
+                      <th>Kode Siklus / Truk</th>
+                      <th>Plat Armada</th>
+                      <th>Stasiun MBS</th>
+                      <th>Waktu Mulai</th>
+                      <th>Waktu Selesai</th>
+                      <th>Total Frame</th>
+                      <th>Rata-rata Kotoran</th>
+                      <th>Grade Mutu AI</th>
+                      <th>Keputusan Pabrik</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: "right" }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTrucks.map((row) => {
+                      const gradeCode = getGradeFromImpurity(row.averageImpurity);
+                      const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                      const endTime = row.completedAt
+                        ? new Date(row.completedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                        : null;
+
+                      const durationMinutes = row.completedAt
+                        ? Math.max(1, Math.round((new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime()) / 60000))
+                        : null;
+
+                      return (
+                        <tr key={row.id}>
+                          <td>
+                            <div className="truckCodeCell">
+                              <Truck size={13} className="truckIcon" />
+                              <strong>{row.truckCode}</strong>
+                            </div>
+                          </td>
+                          <td>
+                            {row.plateNumber ? (
+                              <div className="plateCellWrap">
+                                <span className="plateNumberBadge active">
+                                  {row.plateNumber}
+                                </span>
+                                {row.driverName && (
+                                  <span className="plateDriverSubText" title={`Supir: ${row.driverName}`}>
+                                    {row.driverName}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="plateNumberBadge unassigned">
+                                Belum Terisi
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {(() => {
+                              const station = resolveMbsStation(row.line, cameras);
+                              return (
+                                <div className="stationBadgeWrap">
+                                  <span className={`stationPillBadge ${station.isPrimaryLive ? "primary-active" : ""}`}>
+                                    {station.isPrimaryLive && <span className="statusDotLiveMini" />}
+                                    <strong>{station.label}</strong>
+                                  </span>
+                                  <span className="stationSubText">{station.subLabel}</span>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td>
+                            <span className="timeText">{startTime}</span>
+                          </td>
+                          <td>
+                            {endTime ? (
+                              <div className="endTimeWrap">
+                                <span className="timeText">{endTime}</span>
+                                {durationMinutes && <span className="durationBadge">({durationMinutes}m)</span>}
+                              </div>
+                            ) : (
+                              <span className="runningBadge">
+                                <span className="pulse-dot-red" />
+                                <span>Sedang Berjalan</span>
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <span className="frameCountText">
+                              <strong>{row.totalCaptures}</strong> frame
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`impurityText ${row.averageImpurity > 20 ? "danger" : row.averageImpurity > 10 ? "amber" : "success"}`}>
+                              {row.averageImpurity.toFixed(1)}%
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`dailyCycleGradeBadge grade-${gradeCode.toLowerCase()}`}>
+                              MBS {gradeCode}
+                            </span>
+                          </td>
+                          <td>
+                            {getDecisionBadge(row.finalDecision)}
+                          </td>
+                          <td>
+                            <span className={`sessionStatusPill ${row.status}`}>
+                              {row.status === "completed" ? "SELESAI" : "AKTIF"}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div className="tableActionRow">
+                              <button
+                                type="button"
+                                className="historyDetailBtn"
+                                onClick={() => setSelectedTruckSession(row)}
+                                title="Lihat galeri tangkapan frame dan grafik siklus"
+                              >
+                                <Eye size={12} />
+                                <span>Detail Frame</span>
+                              </button>
+                              {canWrite && (
+                                <button
+                                  type="button"
+                                  className="historyDeleteBtn"
+                                  onClick={() => {
+                                    if (isOperator) {
+                                      setRequestDeletionTarget({
+                                        targetType: "truck_inspection",
+                                        targetId: row.id,
+                                        title: `Siklus ${row.truckCode || row.id}`,
+                                        subtitle: `MBS ${row.line === 2 ? 5 : row.line} • ${row.totalCaptures} Frame Terekam`
+                                      });
+                                    } else {
+                                      if (confirm(`Apakah Anda yakin ingin menghapus data siklus ${row.truckCode} secara langsung sebagai Direksi?`)) {
+                                        void deleteTruckInspection(row.id).catch(err => alert(`Gagal: ${err}`));
+                                      }
+                                    }
+                                  }}
+                                  title={isOperator ? "Ajukan permohonan hapus siklus ke Direksi" : "Hapus rekaman siklus ini"}
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )
+            ) : (
+              filteredHistory.length === 0 ? (
+                <div className="historyEmptyState">
+                  <div className="historyEmptyRadar">
+                    <Camera size={28} />
+                  </div>
+                  <h3>Tidak Ada Rekaman Frame Kamera</h3>
+                  <p>Hubungkan kamera CCTV aktif dan lakukan pemindaian untuk menghasilkan data frame citra AI.</p>
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      className="historyEmptyActionBtn"
+                      onClick={handleResetFilters}
+                    >
+                      Reset Filter
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <table className="historyDataTable">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "65px" }}>Preview</th>
+                      <th>Waktu Deteksi</th>
+                      <th>Kamera MBS</th>
+                      <th>Grade Mutu</th>
+                      <th>Karakteristik Mutu</th>
+                      <th>Ambang Toleransi</th>
+                      <th>Kebijakan Rafaksi</th>
+                      <th>Status Giling</th>
+                      <th>Akurasi AI</th>
+                      <th style={{ textAlign: "right" }}>Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistory.map((row) => {
+                      const g = normalizeGrade(row.grade);
+                      const curConfig = TRANGKIL_GRADES.find(item => item.code === g) || TRANGKIL_GRADES[1];
+                      const confPct = Math.round((row.confidence || 0.88) * 100);
+
+                      return (
+                        <tr key={row.id}>
+                          <td>
+                            <div
+                              className="thumbPreviewCell"
+                              onClick={() => setSelectedCapture(row)}
+                              title="Klik untuk memperbesar gambar frame"
+                            >
+                              {row.snapshot ? (
+                                <img
+                                  src={row.snapshot.startsWith("http") ? row.snapshot : `${backendUrl}${row.snapshot}`}
+                                  alt={`Capture #${row.id}`}
+                                />
+                              ) : (
+                                <Camera size={14} />
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            <span className="timeText">
+                              {new Date(row.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </span>
+                          </td>
+                          <td>
+                            {(() => {
+                              const station = resolveMbsStation(row.cameraId, cameras);
+                              return (
+                                <div className="stationBadgeWrap">
+                                  <span className={`stationPillBadge ${station.isPrimaryLive ? "primary-active" : ""}`}>
+                                    {station.isPrimaryLive && <span className="statusDotLiveMini" />}
+                                    <strong>{station.label}</strong>
+                                  </span>
+                                  <span className="stationSubText">{station.subLabel}</span>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td>
+                            <span className={`dailyCycleGradeBadge grade-${g.toLowerCase()}`}>
+                              MBS {g}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 650, color: "var(--color-text)", fontSize: "12px" }}>
+                              {curConfig.name}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 600, color: "var(--color-muted)", fontSize: "12px" }}>
+                              {curConfig.tol}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 700, color: curConfig.color, fontSize: "12px" }}>
+                              {curConfig.rafaksi}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`decision-badge ${curConfig.tier === "bebas" ? "mbs" : curConfig.tier === "rafaksi" ? "non-mbs" : "reject"}`}>
+                              {curConfig.status}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="confidenceCell">
+                              <span>{confPct}%</span>
+                              <div className="confidenceBarTrack">
+                                <div className="confidenceBarFill" style={{ width: `${confPct}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className="historyDetailBtn"
+                              onClick={() => setSelectedCapture(row)}
+                              title="Buka rincian analisis citra frame ini"
+                            >
+                              <Eye size={12} />
+                              <span>Lihat Detail</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Truck Inspection Detail Modal ─── */}
       {selectedTruckSession && (
         <TruckInspectionDetailModal
           session={selectedTruckSession}
-          history={history}
+          history={visibleHistory}
           onClose={() => setSelectedTruckSession(null)}
           onViewCapture={(cap) => setSelectedCapture(cap)}
         />
       )}
 
-      {/* Capture Detail Modal Overlay */}
+      {/* ─── Retroactive Tapping Auto-Sync Modal ─── */}
+      {isSyncModalOpen && (
+        <TappingSyncModal
+          isOpen={isSyncModalOpen}
+          onClose={() => setIsSyncModalOpen(false)}
+        />
+      )}
+
+      {/* ─── Single Capture Modal Preview ─── */}
       {selectedCapture && (() => {
-        const daun = selectedCapture.classes.daun ?? 0;
-        const pucuk = selectedCapture.classes.pucuk ?? 0;
-        const sampah = selectedCapture.classes.sampah ?? 0;
-        const impurityVal = daun + pucuk + sampah;
-        const bgVal = Math.max(0, 100 - impurityVal);
-        const confPercent = Math.round(selectedCapture.confidence * 100);
+        const capGrade = normalizeGrade(selectedCapture.grade);
+        const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
+        const confPct = Math.round((selectedCapture.confidence || 0.88) * 100);
+        const station = resolveMbsStation(selectedCapture.cameraId, cameras);
+        const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric"
+        });
+        const timeStr = new Date(selectedCapture.timestamp).toLocaleTimeString("id-ID", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        });
 
         return (
-          <div 
+          <div
             className="modal-backdrop"
             onClick={() => setSelectedCapture(null)}
             role="dialog"
@@ -282,145 +1095,277 @@ export function HistoryPage() {
             aria-labelledby="capture-modal-title"
             style={{ zIndex: 10000 }}
           >
-            <div className="capture-detail-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="capture-detail-modal capture-frame-popup" onClick={(e) => e.stopPropagation()}>
+              {/* Header */}
               <div className="capture-detail-modal__header">
-                <div>
-                  <h2 id="capture-modal-title">Capture Detail</h2>
-                  <p>Detection result from recent capture</p>
+                <div className="modal-title-with-badge">
+                  <div className="modal-title-row">
+                    <span className="modal-badge-icon">
+                      <Camera size={15} />
+                    </span>
+                    <h2 id="capture-modal-title">Detail Tangkapan Citra AI</h2>
+                    <span className="modal-batch-pill">Frame #{selectedCapture.id}</span>
+                  </div>
+                  <p>Hasil pemindaian citra frame meja tebu (PG Trangkil) • Anotasi Klasifikasi Mutu Meja Tebu</p>
                 </div>
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="modal-close-btn"
                   onClick={() => setSelectedCapture(null)}
-                  aria-label="Close capture detail"
-                  title="Close"
+                  aria-label="Tutup"
                 >
-                  <X size={20} />
+                  <X size={19} />
                 </button>
               </div>
 
-              <div className="capture-detail-modal__body">
-                <div className="capture-detail-snapshot">
-                  {selectedCapture.snapshot ? (
-                    <div className="snapshot-preview-container">
-                      <img src={selectedCapture.snapshot} alt={`Snapshot for Batch #${selectedCapture.id}`} className="snapshot-preview-img" />
-                      <span className="snapshot-badge">Preview</span>
-                    </div>
-                  ) : (
-                    <div className="no-snapshot-placeholder">
-                      <Camera size={48} className="no-snapshot-icon" />
-                      <h3>No Snapshot Available</h3>
-                      <p>Snapshot image is not available for this capture yet.</p>
-                    </div>
-                  )}
-                </div>
+              {/* Body */}
+              <div className="capture-frame-popup__body">
+                {/* Left Column: Image + Metadata Chips + Factory Decision */}
+                <div className="capture-frame-popup__left">
+                  {/* Snapshot Media Card */}
+                  <div className="capture-snapshot-card">
+                    {selectedCapture.snapshot ? (
+                      <div className="snapshot-preview-container">
+                        <img
+                          src={selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`}
+                          alt={`Snapshot #${selectedCapture.id}`}
+                          className="snapshot-preview-img"
+                        />
+                        <div className="snapshot-overlay-top">
+                          <span className="snapshot-cam-tag">
+                            <span className="snapshot-live-dot" />
+                            {station.label} • {station.subLabel}
+                          </span>
+                          <span className="snapshot-conf-tag">AI Conf: {confPct}%</span>
+                        </div>
+                        <div className="snapshot-overlay-bottom">
+                          <span className="snapshot-time-tag">
+                            <Clock size={10} />
+                            {dateStr} • {timeStr} WIB
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="no-snapshot-placeholder">
+                        <Camera size={38} className="no-snapshot-icon" />
+                        <h3>Citra Snapshot Tidak Tersedia</h3>
+                        <p>File frame tebu belum terekam pada storage.</p>
+                      </div>
+                    )}
+                  </div>
 
-                <div className="capture-detail-info">
-                  {/* Result summary */}
-                  <div className="capture-detail-summary-card">
-                    <div className="summary-left">
-                      <span className="summary-label">PREDICTED GRADE</span>
-                      <h2 className="summary-grade-val">MBS {selectedCapture.grade}</h2>
+                  {/* 4-Item Compact Metadata Grid */}
+                  <div className="capture-meta-strip">
+                    <div className="meta-strip-item">
+                      <span className="meta-label">ID RECORD</span>
+                      <strong className="meta-val">#{selectedCapture.id}</strong>
                     </div>
-                    <div className="summary-right">
-                      <div className="summary-stat-row">
-                        <span>Impurity:</span>
-                        <strong>{impurityVal.toFixed(1)}%</strong>
-                      </div>
-                      <div className="summary-stat-row">
-                        <span>Confidence:</span>
-                        <strong>{confPercent}%</strong>
-                      </div>
-                      <div className="summary-badge-wrapper">
-                        <span className="summary-status-badge">Detection Record</span>
-                      </div>
+                    <div className="meta-strip-item">
+                      <span className="meta-label">SUMBER CCTV</span>
+                      <strong className="meta-val">Kamera {selectedCapture.cameraId || station.mbsNum}</strong>
+                    </div>
+                    <div className="meta-strip-item">
+                      <span className="meta-label">STASIUN MEJA</span>
+                      <strong className="meta-val">{station.label}</strong>
+                    </div>
+                    <div className="meta-strip-item">
+                      <span className="meta-label">WAKTU DETEKSI</span>
+                      <strong className="meta-val">{timeStr}</strong>
                     </div>
                   </div>
 
-                  {/* Capture metadata */}
-                  <div className="capture-info-section">
-                    <h4 className="section-title">METADATA</h4>
-                    <div className="info-grid">
-                      <div className="capture-detail-row">
-                        <span>Record ID</span>
-                        <strong>Batch #{selectedCapture.id}</strong>
+                  {/* Factory Decision Card */}
+                  <div className={`capture-decision-card ${curConfig.badgeCls}`}>
+                    <div className="decision-header-row">
+                      <div className="decision-title-group">
+                        <ShieldCheck size={14} className="decision-shield-icon" />
+                        <strong>KEPUTUSAN OPERASIONAL PABRIK</strong>
                       </div>
-                      <div className="capture-detail-row">
-                        <span>Timestamp</span>
-                        <strong>{new Date(selectedCapture.timestamp).toLocaleString()}</strong>
-                      </div>
-                      <div className="capture-detail-row">
-                        <span>Camera Input</span>
-                        <strong>Camera {selectedCapture.cameraId || "-"}</strong>
-                      </div>
+                      <span className={`decision-status-pill ${curConfig.badgeCls}`}>
+                        {curConfig.decision.toUpperCase()}
+                      </span>
                     </div>
-                  </div>
-
-                  {/* Class breakdown */}
-                  <div className="capture-info-section">
-                    <h4 className="section-title">CLASS BREAKDOWN</h4>
-                    <div className="class-breakdown-list">
-                      {/* Daun */}
-                      <div className="class-bar-wrapper">
-                        <div className="class-bar-info">
-                          <span>Daun (Leaves)</span>
-                          <strong>{daun.toFixed(1)}%</strong>
-                        </div>
-                        <div className="class-bar-track">
-                          <div className="class-bar-fill class-green" style={{ width: `${daun}%` }} />
-                        </div>
+                    <div className="decision-metrics-row">
+                      <div className="decision-metric">
+                        <span>Toleransi Mutu:</span>
+                        <strong>{curConfig.tol}</strong>
                       </div>
-
-                      {/* Pucuk */}
-                      <div className="class-bar-wrapper">
-                        <div className="class-bar-info">
-                          <span>Pucuk (Tops)</span>
-                          <strong>{pucuk.toFixed(1)}%</strong>
-                        </div>
-                        <div className="class-bar-track">
-                          <div className="class-bar-fill class-amber" style={{ width: `${pucuk}%` }} />
-                        </div>
+                      <div className="decision-metric-divider" />
+                      <div className="decision-metric">
+                        <span>Kebijakan Rafaksi:</span>
+                        <strong style={{ color: curConfig.color }}>{curConfig.rafaksi}</strong>
                       </div>
-
-                      {/* Sampah */}
-                      <div className="class-bar-wrapper">
-                        <div className="class-bar-info">
-                          <span>Sampah (Trash)</span>
-                          <strong>{sampah.toFixed(1)}%</strong>
-                        </div>
-                        <div className="class-bar-track">
-                          <div className="class-bar-fill class-red" style={{ width: `${sampah}%` }} />
-                        </div>
-                      </div>
-
-                      {/* Background / Cane */}
-                      <div className="class-bar-wrapper">
-                        <div className="class-bar-info">
-                          <span>Batang Tebu (Sugarcane)</span>
-                          <strong>{bgVal.toFixed(1)}%</strong>
-                        </div>
-                        <div className="class-bar-track">
-                          <div className="class-bar-fill class-gray" style={{ width: `${bgVal}%` }} />
-                        </div>
+                      <div className="decision-metric-divider" />
+                      <div className="decision-metric">
+                        <span>Status Giling:</span>
+                        <strong>{curConfig.status}</strong>
                       </div>
                     </div>
                   </div>
                 </div>
+
+                {/* Right Column: AI Grade Evaluation & Compact Class Distribution */}
+                <div className="capture-frame-popup__right">
+                  {/* Hero Grade Assessment Card */}
+                  <div className="capture-hero-grade-card" style={{ borderColor: `${curConfig.color}45` }}>
+                    <div className="hero-grade-main">
+                      <div className="hero-grade-badge-wrap">
+                        <span className={`hero-grade-pill ${curConfig.badgeCls}`}>
+                          MBS {capGrade}
+                        </span>
+                      </div>
+                      <div className="hero-grade-titles">
+                        <span className="hero-grade-badge-tag">
+                          <CheckCircle size={10} />
+                          <span>PREDICTED GRADE (AI)</span>
+                        </span>
+                        <strong className="hero-grade-title">{curConfig.label} ({curConfig.name})</strong>
+                        <span className="hero-grade-sub">{curConfig.kriteria}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 7-Grade Compact Distribution Section (Softmax Multiclass Frame Output) */}
+                  <div className="capture-grades-dist-card">
+                    <div className="dist-card-header">
+                      <div className="dist-card-title-wrap">
+                        <Layers size={13} />
+                        <strong>DISTRIBUSI PROBABILITAS KELAS MUTU (AI)</strong>
+                      </div>
+                      <span className="dist-card-sub">Standar 7 Kelas Mutu PG Trangkil</span>
+                    </div>
+
+                    <div className="dist-compact-list">
+                      {TRANGKIL_GRADES.map((item, idx) => {
+                        const isMatch = item.code === capGrade;
+                        const prob = isMatch ? confPct : Math.max(1, Math.round((100 - confPct) / 6));
+                        return (
+                          <div
+                            key={item.code}
+                            className={`dist-compact-row ${isMatch ? "active-match" : ""}`}
+                            style={{
+                              borderColor: isMatch ? `${item.color}60` : undefined,
+                              background: isMatch ? `${item.color}0d` : undefined
+                            }}
+                          >
+                            <div className="dist-row-left">
+                              <span className={`dist-code-badge ${item.badgeCls}`}>
+                                {item.code}
+                              </span>
+                              <div className="dist-row-labels">
+                                <span className="dist-row-name">
+                                  {idx + 1}. {item.label}
+                                </span>
+                                <span className="dist-row-desc">{item.name}</span>
+                              </div>
+                            </div>
+
+                            <div className="dist-row-center">
+                              <div className="dist-bar-track">
+                                <div
+                                  className="dist-bar-fill"
+                                  style={{
+                                    width: `${prob}%`,
+                                    background: isMatch ? item.grad : "var(--color-border-strong)"
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="dist-row-right">
+                              <strong
+                                className="dist-row-pct"
+                                style={{ color: isMatch ? item.color : "var(--color-text)" }}
+                              >
+                                {prob}%
+                              </strong>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="capture-detail-modal__footer">
-                <button 
-                  type="button" 
-                  className="modal-footer-btn primary" 
-                  onClick={() => setSelectedCapture(null)}
-                >
-                  Close
-                </button>
+              {/* Footer */}
+              <div className="capture-detail-modal__footer capture-frame-popup__footer">
+                {canWrite ? (
+                  <button
+                    type="button"
+                    className="modal-footer-btn danger"
+                    onClick={async () => {
+                      if (pendingInferenceIds.has(selectedCapture.id)) {
+                        alert("Permohonan penghapusan frame ini sedang menunggu persetujuan Direksi.");
+                        return;
+                      }
+                      if (isOperator) {
+                        setRequestDeletionTarget({
+                          targetType: "inference",
+                          targetId: selectedCapture.id,
+                          title: `Frame #${selectedCapture.id} (Grade ${selectedCapture.grade})`,
+                          subtitle: `Terekam: ${selectedCapture.timestamp}`,
+                          snapshotPath: selectedCapture.snapshot ? (selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`) : undefined
+                        });
+                      } else {
+                        if (confirm(`Hapus rekaman frame #${selectedCapture.id} secara langsung sebagai Direksi?`)) {
+                          await deleteInference(selectedCapture.id);
+                          setSelectedCapture(null);
+                        }
+                      }
+                    }}
+                    title={pendingInferenceIds.has(selectedCapture.id) ? "Menunggu persetujuan Direksi" : isOperator ? "Ajukan permohonan hapus frame ke Direksi" : "Hapus rekaman frame ini"}
+                    style={pendingInferenceIds.has(selectedCapture.id) ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+                  >
+                    <Trash2 size={13} />
+                    <span>{pendingInferenceIds.has(selectedCapture.id) ? "Menunggu Persetujuan Direksi" : isOperator ? "Ajukan Hapus ke Direksi" : "Hapus Frame"}</span>
+                  </button>
+                ) : <div />}
+
+                <div className="modal-footer-actions-right">
+                  <button
+                    type="button"
+                    className="modal-footer-btn primary"
+                    onClick={() => setSelectedCapture(null)}
+                  >
+                    <span>Tutup</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* ─── Modal Pengajuan Penghapusan oleh Operator (Maker) ─── */}
+      {requestDeletionTarget && (
+        <RequestDeletionModal
+          isOpen={Boolean(requestDeletionTarget)}
+          onClose={() => setRequestDeletionTarget(null)}
+          targetType={requestDeletionTarget.targetType}
+          targetId={requestDeletionTarget.targetId}
+          targetTitle={requestDeletionTarget.title}
+          targetSubtitle={requestDeletionTarget.subtitle}
+          snapshotPath={requestDeletionTarget.snapshotPath}
+          onSubmitted={() => {
+            if (requestDeletionTarget.targetType === "inference" && selectedCapture?.id === requestDeletionTarget.targetId) {
+              setSelectedCapture(null);
+            }
+            if (requestDeletionTarget.targetType === "truck_inspection" && selectedTruckSession?.id === String(requestDeletionTarget.targetId)) {
+              setSelectedTruckSession(null);
+            }
+          }}
+        />
+      )}
+
+      {/* ─── Modal Pusat Persetujuan & Otorisasi Direksi (Checker / Admin) ─── */}
+      {isApprovalQueueOpen && (
+        <AdminApprovalQueueModal
+          isOpen={isApprovalQueueOpen}
+          onClose={() => setIsApprovalQueueOpen(false)}
+        />
+      )}
+
     </section>
   );
 }

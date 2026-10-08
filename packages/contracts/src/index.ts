@@ -1,4 +1,4 @@
-export type Grade = "M" | "A/M" | "A" | "D" | "B" | "Reject";
+export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
 export type CameraStatus = "online" | "offline";
 export type TruckDecision = "MBS" | "NON_MBS" | "DITOLAK_DO" | "PENDING";
 

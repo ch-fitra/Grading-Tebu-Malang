@@ -1,4 +1,9 @@
-const backendUrl = window.sugarcaneDesktop?.apiBaseUrl ?? import.meta.env.VITE_API_URL ?? import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110";
+export const backendUrl = window.sugarcaneDesktop?.apiBaseUrl ?? import.meta.env.VITE_API_URL ?? import.meta.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110";
+export const aiServiceUrl = window.sugarcaneDesktop?.aiServiceUrl ?? import.meta.env.VITE_AI_SERVICE_URL ?? "http://127.0.0.1:8010";
+
+export function getCameraStreamUrl(cameraId: number, overlay: boolean = true, quality: number = 80, key?: number | string): string {
+  return `${aiServiceUrl}/stream/${cameraId}?overlay=${overlay ? "true" : "false"}&quality=${quality}${key ? `&t=${key}` : ""}`;
+}
 
 export const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   let token = "";

@@ -1,6 +1,26 @@
 import { useState } from "react";
-import { X, Clock, Calendar, User, FileText, Camera } from "lucide-react";
+import {
+  X,
+  Truck,
+  Calendar,
+  Clock,
+  User,
+  FileText,
+  Camera,
+  ShieldCheck,
+  ChevronDown,
+  Filter,
+  Layers,
+  Activity,
+  Eye,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  HelpCircle,
+  Factory
+} from "lucide-react";
 import type { TruckInspectionSession, InferenceResult } from "../types";
+import { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "./DashboardPage";
 
 interface TruckInspectionDetailModalProps {
   session: TruckInspectionSession;
@@ -9,44 +29,94 @@ interface TruckInspectionDetailModalProps {
   onViewCapture: (capture: InferenceResult) => void;
 }
 
+// Menentukan grade mutu tebu resmi (7 Kelas Mutu PG Trangkil) berdasarkan rata-rata kotoran
+function getGradeFromImpurity(impurity: number): string {
+  if (impurity <= 2) return "S";
+  if (impurity <= 5) return "M";
+  if (impurity <= 10) return "A";
+  if (impurity <= 15) return "D";
+  if (impurity <= 20) return "B";
+  if (impurity <= 35) return "G";
+  return "X";
+}
+
+// Resolver informasi Meja Tebu yang akurat (PG Trangkil MBS 5 / PG Kebon Agung MBS 1)
+function resolveMbsInfo(line?: number, truckCode?: string) {
+  const code = (truckCode || "").toLowerCase();
+  if (line === 2 || line === 5 || code.includes("mbs 5") || code.includes("trangkil")) {
+    return {
+      mbsNum: 5,
+      label: "MBS 5",
+      subLabel: "Meja Tebu 5 (Wisenet)",
+      factory: "PG Trangkil (Pati)",
+      full: "MBS 5 — Meja Tebu 5 (PG Trangkil)"
+    };
+  }
+  if (line === 1 || code.includes("mbs 1") || code.includes("kebon agung") || code.includes("malang")) {
+    return {
+      mbsNum: 1,
+      label: "MBS 1",
+      subLabel: "Meja Tebu 1 (Utama)",
+      factory: "PG Kebon Agung (Malang)",
+      full: "MBS 1 — Meja Tebu 1 (PG Kebon Agung)"
+    };
+  }
+  return {
+    mbsNum: line || 1,
+    label: `MBS ${line || 1}`,
+    subLabel: `Meja Tebu ${line || 1}`,
+    factory: "Stasiun Meja Tebu",
+    full: `MBS ${line || 1} — Meja Tebu ${line || 1}`
+  };
+}
+
 export function TruckInspectionDetailModal({ session, history, onClose, onViewCapture }: TruckInspectionDetailModalProps) {
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string | "all">("all");
+  const pageSize = 8;
 
-  // Filter history records belonging to this session
-  const sessionCaptures = history.filter(item => session.captureIds.includes(item.id));
+  // Filter rekaman capture yang berasosiasi dengan sesi inspeksi truk ini
+  const sessionCaptures = history.filter(item => {
+    if (session.captureIds && session.captureIds.length > 0) {
+      return session.captureIds.includes(item.id);
+    }
+    const started = new Date(session.startedAt).getTime();
+    const ended = session.completedAt ? new Date(session.completedAt).getTime() : Date.now();
+    const itemTime = new Date(item.timestamp).getTime();
+    return itemTime >= started - 15000 && itemTime <= ended + 15000;
+  });
   
-  // Sort captures by timestamp ascending to determine cycle order
+  // Urutkan tangkapan berdasarkan timestamp secara kronologis
   const sortedCaptures = [...sessionCaptures].sort((a, b) => 
     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   );
 
-  const totalPages = Math.max(1, Math.ceil(sortedCaptures.length / pageSize));
-  const pageIndex = Math.min(currentPage, totalPages);
-  const visibleCaptures = sortedCaptures.slice((pageIndex - 1) * pageSize, pageIndex * pageSize);
+  // Filter capture berdasarkan pilihan mutu
+  const filteredCaptures = sortedCaptures.filter(item => {
+    if (selectedGradeFilter === "all") return true;
+    return normalizeGrade(item.grade) === selectedGradeFilter;
+  });
 
-  // Formatting duration helper
+  const totalPages = Math.max(1, Math.ceil(filteredCaptures.length / pageSize));
+  const pageIndex = Math.min(currentPage, totalPages);
+  const visibleCaptures = filteredCaptures.slice((pageIndex - 1) * pageSize, pageIndex * pageSize);
+
+  // Format durasi inspeksi
   const getDuration = () => {
     const end = session.completedAt ? new Date(session.completedAt).getTime() : Date.now();
     const start = new Date(session.startedAt).getTime();
-    const diff = end - start;
+    const diff = Math.max(0, end - start);
     const mins = Math.floor(diff / 60000);
     const secs = Math.floor((diff % 60000) / 1000);
     return `${mins}m ${secs}s`;
   };
 
-  const getDecisionBadge = (decision: string) => {
-    switch (decision) {
-      case "MBS":
-        return <span className="decision-badge mbs">MBS</span>;
-      case "NON_MBS":
-        return <span className="decision-badge non-mbs">Non MBS</span>;
-      case "DITOLAK_DO":
-        return <span className="decision-badge reject">Ditolak / DO</span>;
-      default:
-        return <span className="decision-badge pending">Pending</span>;
-    }
-  };
+  // Evaluasi grade hasil akhir dari rata-rata kotoran sesi truk ini
+  const finalGradeCode = getGradeFromImpurity(session.averageImpurity);
+  const curGradeConfig: TrangkilGradeItem = TRANGKIL_GRADES.find(g => g.code === finalGradeCode) || TRANGKIL_GRADES[1];
+  const mbsInfo = resolveMbsInfo(session.line, session.truckCode);
+
+  const isCompleted = session.status === "completed";
 
   return (
     <div 
@@ -60,215 +130,362 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
         className="capture-detail-modal truck-detail-modal" 
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="capture-detail-modal__header">
-          <div>
-            <h2 id="modal-title-truck-detail">Truck Inspection Detail</h2>
-            <p>Inspection session code: {session.id}</p>
+        {/* Header Modal */}
+        <div className="capture-detail-modal__header truck-detail-header">
+          <div className="modal-title-with-badge">
+            <div className="modal-title-row">
+              <div className="modal-badge-icon" title="Sesi Inspeksi Truk Tebu">
+                <Truck size={16} />
+              </div>
+              <h2 id="modal-title-truck-detail">DETAIL SESI INSPEKSI TRUK & MEJA TEBU</h2>
+              <span className="modal-batch-pill">SISTEM AI GRADING</span>
+              <span className={`truck-status-tag ${isCompleted ? "completed" : "active"}`}>
+                {isCompleted ? "SELESAI" : "SEDANG BERLANGSUNG"}
+              </span>
+            </div>
+            <p>
+              ID Sesi: <code className="truck-session-code">{session.id}</code> &bull; Lokasi: <strong>{mbsInfo.full}</strong>
+            </p>
           </div>
           <button 
             type="button" 
             className="modal-close-btn"
             onClick={onClose}
-            aria-label="Close detail modal"
-            title="Close"
+            aria-label="Tutup detail modal"
+            title="Tutup (Esc)"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
+        {/* Body Modal: 2 Kolom Seimbang (Kiri: Evaluasi Mutu & Metadata | Kanan: Log Siklus Deteksi) */}
         <div className="capture-detail-modal__body truck-detail-body">
-          {/* Main overview grid */}
-          <div className="truck-detail-grid-row">
-            {/* Left side stats summary */}
-            <div className="truck-summary-cards-container">
-              <div className="truck-large-summary-card">
-                <div className="summary-left">
-                  <span className="summary-label">FINAL DECISION</span>
-                  <div style={{ marginTop: 8 }}>
-                    {getDecisionBadge(session.finalDecision)}
-                  </div>
+          {/* Kolom Kiri */}
+          <div className="truck-left-column">
+            {/* Hero Card Evaluasi Mutu Tebu AI */}
+            <div 
+              className="truck-hero-grade-card"
+              style={{ borderColor: `${curGradeConfig.color}45` }}
+            >
+              <div className="truck-hero-grade-header">
+                <span className="truck-hero-tag">
+                  <Activity size={11} />
+                  <span>PREDICTED GRADE (RATA-RATA SIKLUS TRUK)</span>
+                </span>
+                <span className="truck-conf-pill">
+                  {Math.round((session.averageConfidence || 0.88) * 100)}% Akurasi AI
+                </span>
+              </div>
+
+              <div className="truck-hero-grade-main">
+                <div className="truck-grade-badge-wrap">
+                  <span className={`truck-grade-pill ${curGradeConfig.badgeCls}`}>
+                    MBS {curGradeConfig.code}
+                  </span>
                 </div>
-                <div className="summary-right">
-                  <div className="summary-stat-row">
-                    <span>Cycles:</span>
-                    <strong>{session.totalCaptures}</strong>
-                  </div>
-                  <div className="summary-stat-row">
-                    <span>Avg Impurity:</span>
-                    <strong className={session.averageImpurity > 20 ? "text-danger" : session.averageImpurity > 10 ? "text-amber" : "text-success"}>
-                      {session.averageImpurity.toFixed(1)}%
-                    </strong>
-                  </div>
-                  <div className="summary-stat-row">
-                    <span>Confidence:</span>
-                    <strong>{Math.round(session.averageConfidence * 100)}%</strong>
-                  </div>
+                <div className="truck-grade-info">
+                  <strong className="truck-grade-name">{curGradeConfig.label} ({curGradeConfig.name})</strong>
+                  <div className="truck-grade-decision">{curGradeConfig.decision}</div>
+                  <span className="truck-grade-rafaksi">
+                    Kebijakan Rafaksi: <strong>{curGradeConfig.rafaksi}</strong>
+                  </span>
                 </div>
               </div>
 
-              {/* Metadata columns */}
-              <div className="truck-detail-section">
-                <h4 className="section-title">TRUCK & INSPECTOR METADATA</h4>
-                <div className="info-grid text-sm">
-                  <div className="capture-detail-row">
-                    <span>Truck ID / Code</span>
-                    <strong>{session.truckCode}</strong>
-                  </div>
-                  <div className="capture-detail-row">
-                    <span>Plate Number</span>
-                    <strong>{session.plateNumber || "-"}</strong>
-                  </div>
-                  <div className="capture-detail-row">
-                    <span>Driver Name</span>
-                    <strong>{session.driverName || "-"}</strong>
-                  </div>
-                  <div className="capture-detail-row">
-                    <span>Supplier / Vendor</span>
-                    <strong>{session.supplier || "-"}</strong>
-                  </div>
-                  <div className="capture-detail-row">
-                    <span>Inspection Line</span>
-                    <strong>Line {session.line}</strong>
-                  </div>
-                  <div className="capture-detail-row">
-                    <span>Started At</span>
-                    <strong>{new Date(session.startedAt).toLocaleString()}</strong>
-                  </div>
-                  {session.completedAt && (
-                    <div className="capture-detail-row">
-                      <span>Completed At</span>
-                      <strong>{new Date(session.completedAt).toLocaleString()}</strong>
-                    </div>
-                  )}
-                  <div className="capture-detail-row">
-                    <span>Duration</span>
-                    <strong>{getDuration()}</strong>
-                  </div>
+              {/* 4 Metrik Ringkasan Utama */}
+              <div className="truck-hero-metrics-grid">
+                <div className="truck-metric-item">
+                  <span className="truck-metric-label">Total Siklus:</span>
+                  <strong className="truck-metric-val">{session.totalCaptures} Frame</strong>
+                </div>
+                <div className="truck-metric-item">
+                  <span className="truck-metric-label">Rata-rata Kotoran:</span>
+                  <strong 
+                    className="truck-metric-val"
+                    style={{ color: curGradeConfig.color }}
+                  >
+                    {session.averageImpurity.toFixed(1)}%
+                  </strong>
+                </div>
+                <div className="truck-metric-item">
+                  <span className="truck-metric-label">Toleransi Kotoran:</span>
+                  <strong className="truck-metric-val">{curGradeConfig.tol}</strong>
+                </div>
+                <div className="truck-metric-item">
+                  <span className="truck-metric-label">Status Giling:</span>
+                  <strong className="truck-metric-val">{curGradeConfig.status}</strong>
                 </div>
               </div>
+            </div>
 
-              {/* Decision threshold description */}
-              <div className="truck-detail-section">
-                <h4 className="section-title">DECISION RULE EXPLANATION</h4>
-                <div className="decision-explanation-card">
-                  <p>
-                    Final decision calculated based on client impurity guidelines across all {session.totalCaptures} grading cycles:
-                  </p>
-                  <ul className="threshold-rules-list">
-                    <li>Impurity &le; 10% &rarr; <strong>MBS</strong></li>
-                    <li>Impurity 10% - 20% &rarr; <strong>Non MBS</strong></li>
-                    <li>Impurity &gt; 20% &rarr; <strong>Ditolak / DO</strong></li>
-                  </ul>
-                  <div className="explanation-result">
-                    Average Impurity: <strong>{session.averageImpurity.toFixed(2)}%</strong>. 
-                    Result: <strong>{session.finalDecision.replace("_", " ")}</strong>.
-                  </div>
+            {/* Kartu Metadata Truk & Meja Tebu (Grid 2-Kolom Kompak) */}
+            <div className="truck-detail-card truck-metadata-card">
+              <div className="truck-card-title-bar">
+                <Truck size={12} />
+                <h4>METADATA TRUK & MEJA TEBU</h4>
+              </div>
+              <div className="truck-metadata-grid">
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Kode Truk / Siklus</span>
+                  <strong className="truck-meta-val highlight">{session.truckCode}</strong>
+                </div>
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Stasiun Meja Tebu</span>
+                  <strong className="truck-meta-val">{mbsInfo.label} ({mbsInfo.subLabel})</strong>
+                </div>
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Pabrik Gula</span>
+                  <strong className="truck-meta-val">{mbsInfo.factory}</strong>
+                </div>
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Nopol & Driver</span>
+                  <strong className="truck-meta-val">
+                    {session.plateNumber || session.driverName 
+                      ? `${session.plateNumber || "—"}${session.driverName ? ` (${session.driverName})` : ""}`
+                      : "—"}
+                  </strong>
+                </div>
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Waktu Mulai</span>
+                  <strong className="truck-meta-val">
+                    {new Date(session.startedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    <small> ({new Date(session.startedAt).toLocaleDateString("id-ID")})</small>
+                  </strong>
+                </div>
+                <div className="truck-meta-item">
+                  <span className="truck-meta-key">Waktu Selesai (Durasi)</span>
+                  <strong className="truck-meta-val">
+                    {session.completedAt 
+                      ? `${new Date(session.completedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} (${getDuration()})`
+                      : `Berlangsung (${getDuration()})`}
+                  </strong>
                 </div>
               </div>
-
               {session.notes && (
-                <div className="truck-detail-section">
-                  <h4 className="section-title">SESSION NOTES</h4>
-                  <div className="notes-display-box">
-                    <FileText size={14} style={{ marginRight: 6, flexShrink: 0, marginTop: 2 }} />
-                    <p>{session.notes}</p>
-                  </div>
+                <div className="truck-notes-inline">
+                  <FileText size={10} />
+                  <span><strong>Catatan:</strong> {session.notes}</span>
                 </div>
               )}
             </div>
 
-            {/* Right side associated captures log */}
-            <div className="truck-cycles-log-container">
-              <h4 className="section-title">DETECTION CYCLES ({sortedCaptures.length})</h4>
-              
-              {sortedCaptures.length === 0 ? (
-                <div className="no-cycles-box">
-                  <Camera size={24} />
-                  <p>No detection cycles associated with this truck session yet.</p>
-                </div>
-              ) : (
-                <div className="cycles-list-wrapper">
-                  <div className="cycles-table-overflow">
-                    <table className="cycles-log-table">
-                      <thead>
-                        <tr>
-                          <th>Cycle</th>
-                          <th>Time</th>
-                          <th>Grade</th>
-                          <th>Impurity</th>
-                          <th>Conf</th>
-                          <th style={{ textAlign: "right" }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleCaptures.map((item, index) => {
-                          const cycleNumber = (pageIndex - 1) * pageSize + index + 1;
-                          const impurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
-                          return (
-                            <tr key={item.id}>
-                              <td><strong>Cycle #{cycleNumber}</strong></td>
-                              <td>{new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
-                              <td>
-                                <span className={`table-grade-badge grade-${item.grade.replace("/", "-")}`}>
-                                  {item.grade}
-                                </span>
-                              </td>
-                              <td className={impurity > 20 ? "text-danger" : impurity > 10 ? "text-amber" : "text-success"}>
-                                {impurity.toFixed(1)}%
-                              </td>
-                              <td>{Math.round(item.confidence * 100)}%</td>
-                              <td style={{ textAlign: "right" }}>
-                                <button 
-                                  type="button"
-                                  className="view-cycle-btn"
-                                  onClick={() => onViewCapture(item)}
-                                >
-                                  View Detail
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {totalPages > 1 && (
-                    <div className="recentCapturePagination table-pagination">
-                      <button
-                        type="button"
-                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                        disabled={pageIndex === 1}
-                        className="paginationBtn"
-                      >
-                        Previous
-                      </button>
-                      <span className="paginationText">
-                        Page <strong>{pageIndex}</strong> of <strong>{totalPages}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                        disabled={pageIndex === totalPages}
-                        className="paginationBtn"
-                      >
-                        Next
-                      </button>
+            {/* Kartu Standar Evaluasi 7 Kelas Mutu PG Trangkil (Kompak & Presisi) */}
+            <div className="truck-detail-card truck-grades-card">
+              <div className="truck-card-title-bar">
+                <ShieldCheck size={12} />
+                <h4>STANDAR 7 KELAS MUTU TEBU (AI)</h4>
+              </div>
+              <div className="truck-grades-compact-guide">
+                {TRANGKIL_GRADES.map(item => {
+                  const isMatch = item.code === curGradeConfig.code;
+                  return (
+                    <div 
+                      key={item.code} 
+                      className={`truck-guide-row ${isMatch ? "active-grade" : ""}`}
+                      style={{
+                        borderColor: isMatch ? `${item.color}75` : undefined,
+                        background: isMatch ? `${item.color}15` : undefined
+                      }}
+                    >
+                      <span className={`truck-guide-badge ${item.badgeCls}`}>{item.code}</span>
+                      <div className="truck-guide-desc">
+                        <span className="truck-guide-title">
+                          {item.label} <small className="truck-guide-sub">({item.name})</small>
+                        </span>
+                        <span className="truck-guide-kriteria">Tol: {item.tol} &bull; Rafaksi {item.rafaksi}</span>
+                      </div>
+                      {isMatch && (
+                        <span className="truck-guide-match-tag">Hasil AI</span>
+                      )}
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Kolom Kanan: Log Siklus Deteksi Frame */}
+          <div className="truck-right-column">
+            <div className="truck-cycles-header-bar">
+              <div className="truck-card-title-bar no-margin">
+                <Layers size={13} />
+                <h4>
+                  LOG SIKLUS DETEKSI ({filteredCaptures.length}
+                  {filteredCaptures.length !== sortedCaptures.length ? ` / ${sortedCaptures.length}` : ""} Frame)
+                </h4>
+              </div>
+
+              {sortedCaptures.length > 0 && (
+                <div className="cycle-detail-grade-filter">
+                  <ShieldCheck size={11} className="filter-icon" />
+                  <div className="cycle-grade-select-wrap">
+                    <select
+                      value={selectedGradeFilter}
+                      onChange={(e) => {
+                        setSelectedGradeFilter(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      className={`cycle-grade-select ${selectedGradeFilter !== "all" ? "active" : ""}`}
+                      title="Filter mutu tangkapan frame siklus ini"
+                    >
+                      <option value="all">Semua Mutu ({sortedCaptures.length})</option>
+                      {TRANGKIL_GRADES.map((tg) => {
+                        const count = sortedCaptures.filter(c => normalizeGrade(c.grade) === tg.code).length;
+                        return (
+                          <option key={tg.code} value={tg.code} disabled={count === 0}>
+                            {tg.label} ({tg.name}) — {count} frame
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <ChevronDown size={11} className="filter-chevron" />
+                  </div>
+                  {selectedGradeFilter !== "all" && (
+                    <button
+                      type="button"
+                      className="cycle-filter-reset-icon-btn"
+                      onClick={() => {
+                        setSelectedGradeFilter("all");
+                        setCurrentPage(1);
+                      }}
+                      title="Reset filter mutu"
+                    >
+                      <X size={10} />
+                    </button>
                   )}
                 </div>
               )}
             </div>
+
+            {/* Tabel Log Frame Siklus */}
+            {sortedCaptures.length === 0 ? (
+              <div className="truck-empty-cycles-box">
+                <Camera size={32} />
+                <p>Belum ada rekaman frame deteksi AI yang tersimpan pada sesi truk ini.</p>
+              </div>
+            ) : filteredCaptures.length === 0 ? (
+              <div className="truck-empty-cycles-box">
+                <Filter size={32} />
+                <p>Tidak ada frame dengan filter mutu MBS {selectedGradeFilter}.</p>
+                <button
+                  type="button"
+                  className="truck-filter-reset-action"
+                  onClick={() => {
+                    setSelectedGradeFilter("all");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Tampilkan Semua Mutu ({sortedCaptures.length} Frame)
+                </button>
+              </div>
+            ) : (
+              <div className="truck-cycles-table-wrapper">
+                <div className="truck-table-scroll-area">
+                  <table className="truck-cycles-log-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: "95px" }}>Siklus</th>
+                        <th style={{ width: "105px" }}>Waktu</th>
+                        <th style={{ width: "115px" }}>Mutu AI</th>
+                        <th style={{ width: "110px" }}>Kotoran</th>
+                        <th style={{ width: "90px" }}>Akurasi</th>
+                        <th style={{ width: "100px", textAlign: "right" }}>Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleCaptures.map((item, index) => {
+                        const cycleNumber = (pageIndex - 1) * pageSize + index + 1;
+                        const impurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
+                        const normGrade = normalizeGrade(item.grade);
+                        const rowGradeDef = TRANGKIL_GRADES.find(g => g.code === normGrade) || TRANGKIL_GRADES[1];
+
+                        return (
+                          <tr key={item.id} className="truck-cycle-row">
+                            <td>
+                              <span className="cycle-badge">
+                                #{cycleNumber}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="cycle-time-text">
+                                {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`table-grade-badge ${rowGradeDef.badgeCls}`}>
+                                MBS {normGrade}
+                              </span>
+                            </td>
+                            <td>
+                              <strong className={`impurity-val ${impurity > 20 ? "text-danger" : impurity > 10 ? "text-amber" : "text-success"}`}>
+                                {impurity.toFixed(1)}%
+                              </strong>
+                            </td>
+                            <td>
+                              <span className="conf-val">
+                                {Math.round(item.confidence * 100)}%
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              <button 
+                                type="button" 
+                                className="truck-view-cycle-btn"
+                                onClick={() => onViewCapture(item)}
+                                title="Buka citra visual & rincian deteksi AI frame ini"
+                              >
+                                <Eye size={12} />
+                                <span>Detail</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="truck-table-pagination">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={pageIndex === 1}
+                      className="truck-pag-btn"
+                    >
+                      Sebelumnya
+                    </button>
+                    <span className="truck-pag-text">
+                      Halaman <strong>{pageIndex}</strong> dari <strong>{totalPages}</strong> ({filteredCaptures.length} Frame)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={pageIndex === totalPages}
+                      className="truck-pag-btn"
+                    >
+                      Berikutnya
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="capture-detail-modal__footer">
+        {/* Footer Modal */}
+        <div className="capture-detail-modal__footer truck-detail-footer">
+          <span className="truck-footer-hint">
+            <HelpCircle size={13} style={{ marginRight: 5, verticalAlign: "middle" }} />
+            Klik tombol <strong>Detail</strong> pada tabel siklus untuk melihat citra snapshot visual dan distribusi probabilitas AI tiap frame.
+          </span>
           <button 
             type="button" 
-            className="modal-footer-btn primary"
+            className="modal-footer-btn secondary truck-close-action-btn"
             onClick={onClose}
           >
-            Close
+            <X size={14} />
+            <span>Tutup Jendela</span>
           </button>
         </div>
       </div>

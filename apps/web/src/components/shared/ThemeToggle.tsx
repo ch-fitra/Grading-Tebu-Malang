@@ -4,11 +4,7 @@ import { useEffect, useState } from "react";
 export function ThemePreference() {
   const [theme, setTheme] = useState(() => {
     const stored = localStorage.getItem("tebu-ui-theme");
-    if (stored) return stored;
-    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      return "dark";
-    }
-    return "light";
+    return stored === "dark" ? "dark" : "light";
   });
 
   useEffect(() => {
@@ -19,11 +15,7 @@ export function ThemePreference() {
   useEffect(() => {
     const syncTheme = () => {
       const stored = localStorage.getItem("tebu-ui-theme");
-      if (stored) {
-        setTheme(stored);
-      } else {
-        setTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      }
+      setTheme(stored === "dark" ? "dark" : "light");
     };
     window.addEventListener("storage", syncTheme);
     window.addEventListener("focus", syncTheme);

@@ -33,7 +33,8 @@ async function createWindow() {
       webSecurity: true,
       additionalArguments: [
         `--sugarcane-api-url=${clientConfig.apiBaseUrl}`,
-        `--sugarcane-websocket-url=${clientConfig.websocketUrl}`
+        `--sugarcane-websocket-url=${clientConfig.websocketUrl}`,
+        `--sugarcane-ai-service-url=${clientConfig.aiServiceUrl}`
       ]
     }
   });

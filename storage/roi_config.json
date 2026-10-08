@@ -1,0 +1,26 @@
+{
+  "1": {
+    "camera_id": 1,
+    "enabled": true,
+    "x": 0.35,
+    "y": 0.1,
+    "width": 0.58,
+    "height": 0.78,
+    "label": "ROI: MEJA TEBU 2 (PT KEBON AGUNG)",
+    "show_grid": true,
+    "show_telemetry": true,
+    "show_scrim": true
+  },
+  "2": {
+    "camera_id": 2,
+    "enabled": true,
+    "x": 0.1,
+    "y": 0.12,
+    "width": 0.8,
+    "height": 0.76,
+    "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)",
+    "show_grid": true,
+    "show_telemetry": true,
+    "show_scrim": true
+  }
+}

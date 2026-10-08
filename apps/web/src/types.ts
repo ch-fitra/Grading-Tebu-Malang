@@ -1,4 +1,4 @@
-export type Grade = "M" | "A/M" | "A" | "D" | "B" | "Reject";
+export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
 
 export type InferenceResult = {
   id: number;
@@ -51,4 +51,22 @@ export type TruckInspectionSession = {
   averageConfidence: number;
   totalCaptures: number;
   notes?: string;
+};
+
+export type DeletionRequest = {
+  id: string;
+  targetType: "inference" | "truck_inspection" | "all_inferences";
+  targetId: number | string;
+  targetTitle: string;
+  targetSubtitle?: string;
+  snapshotPath?: string;
+  factory: "trangkil" | "kebonagung" | "all";
+  requestedBy: string;
+  requestedAt: string;
+  reason: string;
+  notes?: string;
+  status: "pending" | "approved" | "rejected";
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
 };

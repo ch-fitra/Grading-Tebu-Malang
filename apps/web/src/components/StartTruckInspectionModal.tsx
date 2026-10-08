@@ -123,8 +123,8 @@ export function StartTruckInspectionModal({ line, onClose, onSubmit }: StartTruc
             </div>
 
             <div className="form-field-info full-width">
-              <span>Active Line: <strong>Line {line}</strong></span>
-              <p>Detections on Line {line} will be automatically assigned to this truck.</p>
+              <span>Active MBS: <strong>MBS {line}</strong></span>
+              <p>Detections on MBS {line} will be automatically assigned to this truck.</p>
             </div>
           </div>
         </div>

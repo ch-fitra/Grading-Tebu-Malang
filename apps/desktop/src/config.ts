@@ -11,5 +11,6 @@ export function desktopClientConfig() {
   const apiBaseUrl = apiUrl.href.replace(/\/+$/, "");
   const websocketUrl = new URL(`${apiBaseUrl}/ws`);
   websocketUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
-  return Object.freeze({ apiBaseUrl, websocketUrl: websocketUrl.href });
+  const aiServiceUrl = process.env.SUGARCANE_AI_SERVICE_URL ?? "http://127.0.0.1:8010";
+  return Object.freeze({ apiBaseUrl, websocketUrl: websocketUrl.href, aiServiceUrl });
 }

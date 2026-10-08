@@ -7,9 +7,23 @@ import { IconButton } from "./shared/IconButton";
 import { DataTable } from "./shared/DataTable";
 
 export function CameraManager() {
-  const { cameras, createCamera, updateCamera, deleteCamera } = useAppStore();
+  const { cameras, session, createCamera, updateCamera, deleteCamera } = useAppStore();
   const canWrite = useAppStore(s => s.session?.user.permissions?.includes("camera.write") ?? false);
-  const emptyForm = { name: "", location: "", rtspUrl: "" };
+
+  const userFactory = (() => {
+    const u = (session?.user.username || "").toLowerCase();
+    if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
+    if (u.includes("trangkil")) return "trangkil";
+    return null;
+  })();
+
+  const defaultLocation = userFactory === "kebonagung"
+    ? "Pabrik Gula Kebon Agung (Malang)"
+    : userFactory === "trangkil"
+    ? "Pabrik Gula Trangkil (Pati)"
+    : "";
+
+  const emptyForm = { name: "", location: defaultLocation, rtspUrl: "" };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,17 +58,24 @@ export function CameraManager() {
     await updateCamera(camera.id, { status: camera.status === "online" ? "offline" : "online" });
   }
 
+  // Filter cameras strictly for the user's factory
+  const visibleCameras = cameras.filter((c) => {
+    if (!userFactory) return true;
+    const text = `${c.name} ${c.location}`.toLowerCase();
+    return userFactory === "kebonagung" ? (text.includes("kebon agung") || text.includes("malang")) : text.includes("trangkil");
+  });
+
   // Calculate statistics
-  const totalCameras = cameras.length;
-  const onlineCameras = cameras.filter((c) => c.status === "online").length;
+  const totalCameras = visibleCameras.length;
+  const onlineCameras = visibleCameras.filter((c) => c.status === "online").length;
   const offlineCameras = totalCameras - onlineCameras;
-  const uniqueLines = new Set(cameras.map((c) => c.location).filter(Boolean)).size || totalCameras;
+  const uniqueLines = new Set(visibleCameras.map((c) => c.location).filter(Boolean)).size || totalCameras;
 
   return (
     <section className="managerPage cameraPage">
       <Header 
-        title="Camera Stream Manager" 
-        subtitle="Manage camera stream endpoints, check connectivity, and register new RTSP sources"
+        title={userFactory === "kebonagung" ? "Camera Stream Manager - PT Kebon Agung (Malang)" : userFactory === "trangkil" ? "Camera Stream Manager - PT Trangkil (Pati)" : "Camera Stream Manager"} 
+        subtitle={userFactory === "kebonagung" ? "Pengelolaan kamera RTSP Meja Tebu Pabrik Gula Kebon Agung (Malang)" : userFactory === "trangkil" ? "Pengelolaan kamera RTSP Meja Tebu Pabrik Gula Trangkil (Pati)" : "Manage camera stream endpoints, check connectivity, and register new RTSP sources"}
         action={canWrite ? <IconButton icon={Plus} label="New Camera" onClick={reset} /> : undefined}
       />
 
@@ -144,7 +165,7 @@ export function CameraManager() {
         
         <DataTable
           columns={["Name", "Location", "RTSP Stream Link", "Status", "Actions"]}
-          rows={cameras.map((row) => [
+          rows={visibleCameras.map((row) => [
             <span style={{ fontWeight: 600, color: "var(--color-text)" }}>{row.name}</span>,
             row.location || "-",
             <code className="monospace-text text-truncate" title={row.rtspUrl}>{row.rtspUrl}</code>,
