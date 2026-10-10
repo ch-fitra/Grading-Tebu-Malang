@@ -37,7 +37,7 @@ const FACTORIES: Record<FactoryKey, FactoryDefinition> = {
       { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", locked: true },
       { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", locked: true },
       { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", locked: true },
-      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5 (Wisenet)", cameraId: 2, locked: false },
+      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5 (Wisenet)", cameraId: 1, locked: false },
     ]
   },
   kebonagung: {

@@ -707,6 +707,18 @@ app.post("/api/truck-inspections", async (request, reply) => {
     if ((error as { code?: string }).code === "23505") return reply.code(409).send({ message: "Masih ada inspeksi aktif pada jalur ini" });
     throw error;
   }
+
+  // Notify AI Engine in database sugarcane_ai to start cycle scanning
+  try {
+    await fetch(`${config.aiServiceUrl}/cycle/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ camera_id: camera.id, cycle_code: created.id })
+    });
+  } catch (err) {
+    console.error("Failed to trigger AI Engine cycle/start:", err);
+  }
+
   broadcast("truck.created", created);
   return created;
 });
@@ -721,6 +733,18 @@ app.patch("/api/truck-inspections/:id/complete", async (request, reply) => {
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
   const completed = await trucks.complete(id, parsed.data.notes);
   if (!completed) return reply.code(404).send({ message: "Inspeksi aktif tidak ditemukan" });
+
+  // Notify AI Engine in database sugarcane_ai to stop cycle scanning & aggregate ai_results
+  try {
+    await fetch(`${config.aiServiceUrl}/cycle/stop`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cycle_code: id })
+    });
+  } catch (err) {
+    console.error("Failed to trigger AI Engine cycle/stop:", err);
+  }
+
   broadcast("truck.completed", completed);
   return completed;
 });

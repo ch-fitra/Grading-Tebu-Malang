@@ -84,14 +84,16 @@ class AIRegressionTests(unittest.TestCase):
 
     def test_segmentation_counts_every_pixel_and_derives_confidence(self):
         masks = np.array([[[[0.8, 0.1], [0.1, 0.1]], [[0.1, 0.9], [0.1, 0.2]], [[0.1, 0.1], [0.7, 0.1]]]])
-        classes, confidence = main.segmentation_measurement(masks, main.load_config())
+        config = main.ModelConfig(name="test", version="1.0", type="segmentation", input_size=224, classes=["daun", "pucuk", "sampah"])
+        classes, confidence = main.segmentation_measurement(masks, config)
         self.assertEqual(classes, {"daun": 25.0, "pucuk": 25.0, "sampah": 25.0})
         self.assertAlmostEqual(confidence, 0.65)
 
     def test_segmentation_rejects_unknown_shapes_and_invalid_probabilities(self):
+        config = main.ModelConfig(name="test", version="1.0", type="segmentation", input_size=224, classes=["daun", "pucuk", "sampah"])
         for output in (np.ones((1, 3)), np.ones((1, 4, 2, 2)), np.full((1, 3, 2, 2), np.nan), np.full((1, 3, 2, 2), 5)):
             with self.assertRaises(HTTPException):
-                main.segmentation_measurement(output, main.load_config())
+                main.segmentation_measurement(output, config)
 
 
 if __name__ == "__main__":

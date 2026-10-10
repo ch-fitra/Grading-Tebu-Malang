@@ -86,6 +86,17 @@ def load_all_rois() -> Dict[int, ROIModel]:
     global _CACHED_ROIS
     if _CACHED_ROIS is not None:
         return _CACHED_ROIS
+
+    # Try loading from DB sugarcane_ai first
+    try:
+        from db.repository import AIRepository
+        db_roi = AIRepository.get_camera_roi(1)
+        if db_roi:
+            _CACHED_ROIS = {1: ROIModel(**db_roi)}
+            return _CACHED_ROIS
+    except Exception as e:
+        logger.warning(f"Could not load ROI from DB sugarcane_ai: {e}")
+
     if ROI_CONFIG_FILE.exists():
         try:
             data = json.loads(ROI_CONFIG_FILE.read_text(encoding="utf-8"))
@@ -105,6 +116,13 @@ def save_roi(roi: ROIModel):
     ROI_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     serializable = {str(k): v.model_dump() for k, v in all_rois.items()}
     ROI_CONFIG_FILE.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
+
+    # Sync to DB sugarcane_ai
+    try:
+        from db.repository import AIRepository
+        AIRepository.update_camera_roi(roi.camera_id, roi.model_dump())
+    except Exception as e:
+        logger.warning(f"Failed to sync ROI to DB sugarcane_ai: {e}")
 
 
 class CameraStream:
