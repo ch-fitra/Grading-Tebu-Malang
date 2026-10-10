@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("ai_db")
 
 ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(ROOT / ".env", override=False)
 
 # Database Connection URLs
 PRIMARY_DB_URL = os.getenv("DATABASE_URL", "postgres://postgres:admin123@127.0.0.1:5432/sugarcane")

@@ -1,3 +1,4 @@
+import { frameNumbers, dominantGrade } from "../utils/grade-data";
 import { useState, useEffect, useMemo } from "react";
 import {
   History,
@@ -43,7 +44,7 @@ import { resolveMbsStation } from "../utils/stations";
 function normalizeGrade(g?: string): string {
   if (!g) return "M";
   const u = g.toUpperCase().trim().replace(/^MBS\s*/, "").trim();
-  if (["S", "M", "A", "D", "B", "G", "X"].includes(u)) return u;
+  if (["S", "M", "A", "D", "B", "T", "G", "X"].includes(u)) return u;
   if (u === "REJECT" || u === "REJECT_G") return "G";
   if (u === "REJECT_X") return "X";
   if (u === "C") return "D";
@@ -63,6 +64,15 @@ function getGradeFromImpurity(imp: number): string {
 
 export function HistoryPage() {
   const { history, truckSessions, cameras, session, status, deleteTruckInspection, deleteInference, deletionRequests } = useAppStore();
+  const frameNumberMap = frameNumbers(history, truckSessions || []);
+  const frameNumber = (id: number) => frameNumberMap.get(id) ?? 1;
+  const cycleGrade = (row: TruckInspectionSession) => {
+    const ids = new Set(row.captureIds || []);
+    const start = new Date(row.startedAt).getTime();
+    const end = row.completedAt ? new Date(row.completedAt).getTime() : Date.now();
+    return dominantGrade(history.filter(item => ids.size ? ids.has(item.id) :
+      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000)) ?? "M";
+  };
   const canWrite = useAppStore(s => s.session?.user.permissions?.includes("inspection.write") ?? false);
   const isAdmin = session?.user.role === "admin";
   const isOperator = session?.user.role === "operator";
@@ -304,9 +314,9 @@ export function HistoryPage() {
         row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
         row.totalCaptures,
         `${row.averageImpurity.toFixed(2)}%`,
-        `MBS ${getGradeFromImpurity(row.averageImpurity)}`,
+        `MBS ${cycleGrade(row)}`,
         `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
-        row.finalDecision.replace("_", " "),
+        TRANGKIL_GRADES.find(g => g.code === cycleGrade(row))?.decision ?? "Belum ditetapkan",
         row.status,
         row.notes || "-"
       ];
@@ -422,7 +432,7 @@ export function HistoryPage() {
 
           <div className="stationClock">
             <Clock size={12} />
-            <span>{clock.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+            <span>{clock.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
           </div>
 
           <button
@@ -745,7 +755,6 @@ export function HistoryPage() {
                       <th>Waktu Mulai</th>
                       <th>Waktu Selesai</th>
                       <th>Total Frame</th>
-                      <th>Rata-rata Kotoran</th>
                       <th>Grade Mutu AI</th>
                       <th>Keputusan Pabrik</th>
                       <th>Status</th>
@@ -754,10 +763,10 @@ export function HistoryPage() {
                   </thead>
                   <tbody>
                     {filteredTrucks.map((row) => {
-                      const gradeCode = getGradeFromImpurity(row.averageImpurity);
-                      const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                      const gradeCode = cycleGrade(row);
+                      const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
                       const endTime = row.completedAt
-                        ? new Date(row.completedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                        ? new Date(row.completedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
                         : null;
 
                       const durationMinutes = row.completedAt
@@ -826,17 +835,12 @@ export function HistoryPage() {
                             </span>
                           </td>
                           <td>
-                            <span className={`impurityText ${row.averageImpurity > 20 ? "danger" : row.averageImpurity > 10 ? "amber" : "success"}`}>
-                              {row.averageImpurity.toFixed(1)}%
-                            </span>
-                          </td>
-                          <td>
                             <span className={`dailyCycleGradeBadge grade-${gradeCode.toLowerCase()}`}>
                               MBS {gradeCode}
                             </span>
                           </td>
                           <td>
-                            {getDecisionBadge(row.finalDecision)}
+                            {<span className={`decision-badge ${["G", "X"].includes(gradeCode) ? "reject" : ["D", "B"].includes(gradeCode) ? "non-mbs" : gradeCode === "T" ? "pending" : "mbs"}`}>{TRANGKIL_GRADES.find(g => g.code === gradeCode)?.decision ?? "Belum ditetapkan"}</span>}
                           </td>
                           <td>
                             <span className={`sessionStatusPill ${row.status}`}>
@@ -945,7 +949,7 @@ export function HistoryPage() {
                           </td>
                           <td>
                             <span className="timeText">
-                              {new Date(row.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                              {new Date(row.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                             </span>
                           </td>
                           <td>
@@ -1046,7 +1050,7 @@ export function HistoryPage() {
           month: "2-digit",
           year: "numeric"
         });
-        const timeStr = new Date(selectedCapture.timestamp).toLocaleTimeString("id-ID", {
+        const timeStr = new Date(selectedCapture.timestamp).toLocaleTimeString("id-ID", { hour12: false,
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit"
@@ -1070,7 +1074,7 @@ export function HistoryPage() {
                       <Camera size={15} />
                     </span>
                     <h2 id="capture-modal-title">Detail Tangkapan Citra AI</h2>
-                    <span className="modal-batch-pill">Frame #{selectedCapture.id}</span>
+                    <span className="modal-batch-pill">Frame {frameNumber(selectedCapture.id)}</span>
                   </div>
                   <p>Hasil pemindaian citra frame meja tebu (PG Trangkil) • Anotasi Klasifikasi Mutu Meja Tebu</p>
                 </div>
@@ -1124,7 +1128,7 @@ export function HistoryPage() {
                   <div className="capture-meta-strip">
                     <div className="meta-strip-item">
                       <span className="meta-label">ID RECORD</span>
-                      <strong className="meta-val">#{selectedCapture.id}</strong>
+                      <strong className="meta-val">{frameNumber(selectedCapture.id)}</strong>
                     </div>
                     <div className="meta-strip-item">
                       <span className="meta-label">SUMBER CCTV</span>

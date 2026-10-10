@@ -166,7 +166,8 @@ class AIRepository:
         confidence: float,
         image_blob: Optional[bytes] = None,
         cycle_id: Optional[int] = None,
-        cycle_code: Optional[str] = None
+        cycle_code: Optional[str] = None,
+        captured_at: Optional[str] = None
     ) -> Optional[int]:
         try:
             with get_ai_db_connection() as conn:
@@ -193,14 +194,14 @@ class AIRepository:
                         INSERT INTO ai_inference_results (
                             cycle_id, cycle_code, camera_id, model_version, snapshot_path, image_blob,
                             classes_score, total_impurity, detected_class,
-                            confidence
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            confidence, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, NOW()))
                         RETURNING id;
                     """, (
                         cycle_id, cycle_code, camera_id, model_version, snapshot_path,
                         image_blob, json.dumps(classes_score),
                         total_impurity, detected_class,
-                        confidence
+                        confidence, captured_at
                     ))
                     result = cursor.fetchone()
                     conn.commit()

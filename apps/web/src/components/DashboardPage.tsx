@@ -1,3 +1,4 @@
+import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
 import { Cpu, Clock, Camera, Radio, Activity, CheckCircle, CheckCircle2, AlertTriangle, Shield, ShieldCheck, ShieldAlert, Crown, Layers, VideoOff, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, Wifi, WifiOff, TrendingUp, BarChart3, Leaf, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
@@ -88,7 +89,7 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-export type TrangkilGradeCode = "S" | "M" | "A" | "D" | "B" | "G" | "X";
+export type TrangkilGradeCode = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 
 export interface GradeVariationLine {
   label: string;
@@ -221,6 +222,17 @@ export const TRANGKIL_GRADES: TrangkilGradeItem[] = [
     ]
   },
   {
+    code: "T", label: "MBS T", name: "Belum ditetapkan",
+    tol: "Belum ditetapkan", rafaksi: "Belum ditetapkan", status: "Hasil Deteksi T",
+    statusCls: "t", badgeCls: "badge-t", img: "/grades/mbs-t.png",
+    color: "#9333ea", grad: "linear-gradient(90deg, #9333ea, #c084fc)",
+    kriteria: "Kelas T sesuai hasil model dan database. Aturan toleransi dan rafaksi belum ditetapkan.",
+    decision: "Belum ditetapkan", tier: "rafaksi",
+    variasi: [{ label: "Kelas Model", value: "T", status: "warn" },
+      { label: "Toleransi", value: "Belum ditetapkan", status: "warn" },
+      { label: "Rafaksi", value: "Belum ditetapkan", status: "warn" }]
+  },
+  {
     code: "G",
     label: "MBS G",
     name: "Ditolak Giling",
@@ -272,6 +284,7 @@ export function normalizeGrade(rawGrade?: string | null): TrangkilGradeCode {
   if (g === "A") return "A";
   if (g === "D") return "D";
   if (g === "B") return "B";
+  if (g === "T") return "T";
   if (g === "G" || g === "REJECT" || g === "REJECT_G") return "G";
   if (g === "X" || g === "REJECT_X") return "X";
   if (g === "C") return "D";
@@ -281,6 +294,17 @@ export function normalizeGrade(rawGrade?: string | null): TrangkilGradeCode {
 
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
+  const [modelFrames, setModelFrames] = useState<InferenceResult[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const refreshFrames = async () => {
+      try { const frames = await api<InferenceResult[]>("/api/inference/model-frames"); if (!cancelled) setModelFrames(frames); }
+      catch { /* Preserve the last confirmed database data during a temporary outage. */ }
+    };
+    void refreshFrames();
+    const interval = setInterval(refreshFrames, 1000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [session?.user.id]);
   const isAdmin = session?.user.role === "admin";
   const canInspect = !isAdmin && (session?.user.permissions.includes("inspection.write") ?? false);
   const captureInFlight = useRef(false);
@@ -427,6 +451,8 @@ export function DashboardPage() {
   const activeCamera = targetCameraId ? cameras.find((c) => c.id === targetCameraId) : undefined;
 
   // Active & historical cycles for current station
+  const frameNumberMap = frameNumbers(history, truckSessions || []);
+  const frameNumber = (id: number) => frameNumberMap.get(id) ?? 1;
   const activeCycle = (truckSessions || []).find((s) => s.line === targetCameraId && s.status === "active") || null;
   const lineCycles = (truckSessions || []).filter((s) => s.line === targetCameraId);
   const selectedCycle = selectedCycleId ? lineCycles.find((s) => s.id === selectedCycleId) : null;
@@ -461,47 +487,12 @@ export function DashboardPage() {
     }
   }
 
-  // Continuous auto-scan during active cycle
+  // AI service owns capture timing; browsers only refresh persisted results.
   useEffect(() => {
-    if (!activeCycle || !targetCameraId || !canInspect) {
-      if (autoScanTimerRef.current) {
-        clearInterval(autoScanTimerRef.current);
-        autoScanTimerRef.current = null;
-      }
-      return;
-    }
-
-    let cancelled = false;
-    const interval = setInterval(async () => {
-      if (capturing || captureInFlight.current || cancelled) return;
-      captureInFlight.current = true;
-      try {
-        const res = await api<InferenceResult>(`/api/cameras/${targetCameraId}/capture`, {
-          method: "POST",
-          body: JSON.stringify({})
-        });
-        if (cancelled) return;
-        await refresh();
-
-        // Check if tebu is out of frame (empty conveyor)
-        if (autoStopEnabled && res.conveyorEmpty === true) {
-          emptyFrameCountRef.current += 1;
-          if (emptyFrameCountRef.current >= 3) {
-            handleStopCycle("Auto-Stop: Tebu telah keluar dari frame CCTV (Meja Bersih)");
-          }
-        } else {
-          emptyFrameCountRef.current = 0;
-        }
-      } catch (err) {
-        console.warn("Auto-cycle error:", err);
-      } finally {
-        captureInFlight.current = false;
-      }
-    }, 1800);
-
-    autoScanTimerRef.current = interval;
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [activeCycle?.id, targetCameraId, autoStopEnabled, capturing, canInspect]);
+    if (!activeCycle) return;
+    const interval = setInterval(() => { void refresh(); }, 1000);
+    return () => clearInterval(interval);
+  }, [activeCycle?.id, refresh]);
 
   async function handleStartCycle() {
     if (!canInspect) return;
@@ -595,7 +586,7 @@ export function DashboardPage() {
   }, [isStreaming, targetCameraId, currentLineDef?.locked]);
 
   async function handleManualCapture() {
-    if (capturing || captureInFlight.current || !targetCameraId || !canInspect) return;
+    if (capturing || captureInFlight.current || !targetCameraId || !canInspect || activeCycle) return;
     captureInFlight.current = true;
     setCapturing(true);
     try {
@@ -645,16 +636,23 @@ export function DashboardPage() {
     });
   }, [selectedCycle, activeLineHistory]);
 
+  const lineModelFrames = modelFrames.filter(item => item.cameraId === targetCameraId);
+  const analysisFrames = lineModelFrames.length ? lineModelFrames : activeLineHistory;
+  const cycleModelFrames = selectedCycle ? analysisFrames.filter(item => {
+    const t = new Date(item.timestamp).getTime();
+    return t >= new Date(selectedCycle.startedAt).getTime() - 1000 &&
+      t <= (selectedCycle.completedAt ? new Date(selectedCycle.completedAt).getTime() + 1000 : Date.now());
+  }) : analysisFrames;
   const displayedEvents = displayedCaptures;
 
   const activeCycleFrames = useMemo(() => {
     if (!activeCycle) return [];
     const start = new Date(activeCycle.startedAt).getTime();
-    return activeLineHistory.filter((item) => {
+    return analysisFrames.filter((item) => {
       const t = new Date(item.timestamp).getTime();
       return t >= start - 1000;
     });
-  }, [activeCycle, activeLineHistory]);
+  }, [activeCycle, analysisFrames]);
 
   const pageSize = 15;
   const totalPages = Math.max(1, Math.ceil(displayedCaptures.length / pageSize));
@@ -682,7 +680,7 @@ export function DashboardPage() {
   // Effective inference for category analysis:
   // 1. If currently running an active cycle: AVERAGE ALL FRAMES from the start of the active cycle!
   // 2. If a specific cycle is filtered: AVERAGE ALL FRAMES belonging to that cycle!
-  // 3. Fallback to latest single capture
+  // 3. When scanning has stopped, retain the aggregate for the selected camera/filter.
   const effectiveInference = useMemo(() => {
     if (activeCycle && activeCycleFrames.length > 0) {
       const count = activeCycleFrames.length;
@@ -697,7 +695,8 @@ export function DashboardPage() {
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: avgConf,
-        grade: getGradeFromImpurity(avgImp),
+        grade: dominantGrade(activeCycleFrames) ?? "M",
+        classScores: meanClassScores(activeCycleFrames),
         id: activeCycleFrames[0]?.id || 0,
         timestamp: activeCycle.startedAt,
         cameraId: targetCameraId || 0,
@@ -707,31 +706,40 @@ export function DashboardPage() {
       };
     }
 
-    if (selectedCycle && displayedCaptures.length > 0) {
-      const count = displayedCaptures.length;
-      const sumDaun = displayedCaptures.reduce((s, c) => s + c.classes.daun, 0);
-      const sumPucuk = displayedCaptures.reduce((s, c) => s + c.classes.pucuk, 0);
-      const sumSampah = displayedCaptures.reduce((s, c) => s + c.classes.sampah, 0);
+    if (cycleModelFrames.length > 0) {
+      const count = cycleModelFrames.length;
+      const sumDaun = cycleModelFrames.reduce((s, c) => s + c.classes.daun, 0);
+      const sumPucuk = cycleModelFrames.reduce((s, c) => s + c.classes.pucuk, 0);
+      const sumSampah = cycleModelFrames.reduce((s, c) => s + c.classes.sampah, 0);
       const avgDaun = Math.round((sumDaun / count) * 10) / 10;
       const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
       const avgSampah = Math.round((sumSampah / count) * 10) / 10;
-      const avgImp = selectedCycle.averageImpurity ?? Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
+      const avgImp = selectedCycle?.averageImpurity ?? Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
-        confidence: selectedCycle.averageConfidence ?? 0,
-        grade: getGradeFromImpurity(avgImp),
-        id: displayedCaptures[0]?.id || 0,
-        timestamp: selectedCycle.startedAt,
+        confidence: cycleModelFrames.reduce((sum, frame) => sum + frame.confidence, 0) / count,
+        grade: dominantGrade(cycleModelFrames) ?? "M",
+        classScores: meanClassScores(cycleModelFrames),
+        id: cycleModelFrames[0]?.id || 0,
+        timestamp: selectedCycle?.startedAt ?? cycleModelFrames[0].timestamp,
         cameraId: targetCameraId || 0,
-        snapshot: displayedCaptures[0]?.snapshot || null,
+        snapshot: cycleModelFrames[0]?.snapshot || null,
         isCumulativeCycle: true,
         cycleFrameCount: count,
       };
     }
 
     return latest;
-  }, [activeCycle, activeCycleFrames, selectedCycle, displayedCaptures, latest, targetCameraId]);
+  }, [activeCycle, activeCycleFrames, selectedCycle, cycleModelFrames, latest, targetCameraId]);
 
+  const cycleGrade = (cycle: typeof lineCycles[number]): Grade => {
+    const ids = new Set(cycle.captureIds || []);
+    const start = new Date(cycle.startedAt).getTime();
+    const end = cycle.completedAt ? new Date(cycle.completedAt).getTime() : Date.now();
+    const frames = analysisFrames.filter(item =>
+      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000);
+    return dominantGrade(frames) ?? "M";
+  };
   // Agregasi Seluruh Siklus Meja Tebu untuk Stasiun / Pabrik ini
   const dailyCyclesStats = useMemo(() => {
     const cycles = lineCycles || [];
@@ -739,7 +747,10 @@ export function DashboardPage() {
     if (totalCycles === 0) return null;
 
     const completedCycles = cycles.filter(c => c.status === "completed");
-    const totalFrames = cycles.reduce((acc, c) => acc + (c.totalCaptures || 0), 0);
+    const totalFrames = analysisFrames.filter(item => cycles.some(c => {
+      const t = new Date(item.timestamp).getTime();
+      return t >= new Date(c.startedAt).getTime() - 1000 && t <= (c.completedAt ? new Date(c.completedAt).getTime() + 1000 : Date.now());
+    })).length;
 
     // Average impurity across all cycles
     const avgImpurity = cycles.length > 0
@@ -750,12 +761,12 @@ export function DashboardPage() {
       ? cycles.reduce((acc, c) => acc + (c.averageConfidence ?? 0), 0) / cycles.length
       : 0.88;
 
-    const overallGrade = getGradeFromImpurity(avgImpurity);
+    const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? "M";
 
     // Hitung distribusi kelas dari seluruh siklus
     const gradeCounts = TRANGKIL_GRADES.map((tg) => {
       const count = cycles.filter(c => {
-        const cGrade = getGradeFromImpurity(c.averageImpurity);
+        const cGrade = cycleGrade(c);
         return cGrade === tg.code;
       }).length;
       const pct = totalCycles > 0 ? Math.round((count / totalCycles) * 100) : 0;
@@ -767,12 +778,12 @@ export function DashboardPage() {
     });
 
     // Hitung persentase lolos (S, M, A) vs kena sanksi/reject (D, B, G, X)
-    const passCount = cycles.filter(c => c.averageImpurity <= 10).length;
+    const passCount = cycles.filter(c => ["S", "M", "A"].includes(cycleGrade(c))).length;
     const passPct = Math.round((passCount / totalCycles) * 100);
 
     // List siklus berurutan dengan info grade dan impuritas masing-masing
     const cycleTimeline = cycles.map((c, idx) => {
-      const cGrade = getGradeFromImpurity(c.averageImpurity);
+      const cGrade = cycleGrade(c);
       const gradeDef = TRANGKIL_GRADES.find(g => g.code === cGrade) || TRANGKIL_GRADES[1];
       return {
         id: c.id,
@@ -780,7 +791,7 @@ export function DashboardPage() {
         code: c.truckCode,
         startedAt: c.startedAt,
         completedAt: c.completedAt,
-        frames: c.totalCaptures || 0,
+        frames: analysisFrames.filter(item => { const t = new Date(item.timestamp).getTime(); return t >= new Date(c.startedAt).getTime() - 1000 && t <= (c.completedAt ? new Date(c.completedAt).getTime() + 1000 : Date.now()); }).length,
         impurity: Math.round((c.averageImpurity || 0) * 10) / 10,
         grade: cGrade,
         gradeDef,
@@ -800,7 +811,7 @@ export function DashboardPage() {
       gradeCounts,
       cycleTimeline
     };
-  }, [lineCycles]);
+  }, [lineCycles, analysisFrames]);
 
   // Pagination untuk Tren Mutu per Setiap Siklus (Zero Scroll)
   const timelinePageSize = 3;
@@ -821,35 +832,12 @@ export function DashboardPage() {
   const background = hasLatestInference ? Math.max(0, 100 - impurity) : 0;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
 
-  // Distribusi Probabilitas 7 Kelas MBS Model AI PT Trangkil
-  const gradeDistribution = useMemo(() => {
-    const curGrade = normalizeGrade(grade);
-    const primaryProb = hasLatestInference ? Math.round(gradeConf * 100) : 0;
-    const rem = 100 - primaryProb;
-
-    return TRANGKIL_GRADES.map((item, idx) => {
-      let prob = 0;
-      if (!hasLatestInference) {
-        prob = 0;
-      } else if (item.code === curGrade) {
-        prob = primaryProb;
-      } else {
-        const curIdx = TRANGKIL_GRADES.findIndex(g => g.code === curGrade);
-        const distance = Math.abs(idx - curIdx);
-        if (distance === 1) {
-          prob = Math.max(1, Math.round(rem * 0.55));
-        } else if (distance === 2) {
-          prob = Math.max(1, Math.round(rem * 0.25));
-        } else {
-          prob = Math.max(0, Math.round(rem * 0.05));
-        }
-      }
-      return {
-        ...item,
-        prob
-      };
-    });
-  }, [grade, gradeConf, hasLatestInference]);
+  // Model scores are persisted percentages; no invented neighbouring probabilities.
+  const gradeDistribution = useMemo(() => TRANGKIL_GRADES.map(item => ({
+    ...item,
+    prob: hasLatestInference ? Math.round(effectiveInference?.classScores?.[item.code] ??
+      (item.code === grade ? gradeConf * 100 : 0)) : 0
+  })), [effectiveInference, grade, gradeConf, hasLatestInference]);
 
   // Rekomendasi Operasional Mutu PG Trangkil (7 Kelas Resmi)
   const factoryRecommendation = useMemo(() => {
@@ -897,6 +885,7 @@ export function DashboardPage() {
         badgeClass: "danger-soft"
       };
     }
+    if (g === "T") return { status: "CLASS_T", label: "Hasil Deteksi MBS T", desc: "Kelas T dari model AI. Aturan toleransi dan rafaksi perlu ditetapkan oleh pabrik.", badgeClass: "warning" };
     if (g === "G") {
       return {
         status: "REJECT_G",
@@ -915,20 +904,20 @@ export function DashboardPage() {
 
   // Statistik Konsistensi Siklus Meja Tebu (7 Kelas PT Trangkil)
   const cycleConsistency = useMemo(() => {
-    if (!displayedCaptures || displayedCaptures.length === 0) return null;
-    const total = displayedCaptures.length;
+    if (!cycleModelFrames || cycleModelFrames.length === 0) return null;
+    const total = cycleModelFrames.length;
     const counts = TRANGKIL_GRADES.map(tg => ({
       code: tg.label,
       rawCode: tg.code,
       color: tg.color,
-      count: displayedCaptures.filter(c => normalizeGrade(c.grade) === tg.code).length
+      count: cycleModelFrames.filter(c => normalizeGrade(c.grade) === tg.code).length
     }));
 
     const dominant = counts.reduce((max, cur) => cur.count > max.count ? cur : max, counts[0]);
     const dominantPct = Math.round((dominant.count / total) * 100);
 
     return { total, counts, dominantGrade: dominant.code, dominantPct };
-  }, [displayedCaptures]);
+  }, [cycleModelFrames]);
 
   // Metrik Tata Kelola Eksekutif Direksi (KPI Agregat & Rasio Mutu Bebas vs Sanksi)
   const execStats = useMemo(() => {
@@ -941,7 +930,7 @@ export function DashboardPage() {
     let rejectCount = 0;
 
     cycles.forEach((c) => {
-      const g = getGradeFromImpurity(c.averageImpurity);
+      const g = cycleGrade(c);
       if (["S", "M", "A"].includes(g)) freePassCount++;
       else if (["D", "B"].includes(g)) penaltyCount++;
       else if (["G", "X"].includes(g)) rejectCount++;
@@ -950,7 +939,7 @@ export function DashboardPage() {
     if (totalTrucks === 0 && activeLineHistory.length > 0) {
       activeLineHistory.forEach((item) => {
         const imp = item.classes.daun + item.classes.pucuk + item.classes.sampah;
-        const g = getGradeFromImpurity(imp);
+        const g = item.grade;
         if (["S", "M", "A"].includes(g)) freePassCount++;
         else if (["D", "B"].includes(g)) penaltyCount++;
         else if (["G", "X"].includes(g)) rejectCount++;
@@ -1113,7 +1102,7 @@ export function DashboardPage() {
 
           <div className="stationClock">
             <Clock size={12} />
-            <span>{clock.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+            <span>{clock.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
           </div>
           {/* Quick Light/Dark Mode Switcher */}
           <button
@@ -1158,7 +1147,7 @@ export function DashboardPage() {
                       type="button"
                       className={`stStreamBtn captureBtn ${captureFeedback ? "success" : ""}`}
                       onClick={handleManualCapture}
-                      disabled={capturing || !canInspect || !status?.ai.model?.available}
+                      disabled={capturing || !canInspect || Boolean(activeCycle) || !status?.ai.model?.available}
                       title="AI Capture"
                     >
                       <Camera size={12} />
@@ -1448,7 +1437,7 @@ export function DashboardPage() {
               <div className="telItem">
                 <span className="telLabel">LAST SCAN</span>
                 <strong className="telVal">
-                  {latest ? new Date(latest.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
+                  {latest ? new Date(latest.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}
                 </strong>
               </div>
               <div className="telItem">
@@ -1495,7 +1484,7 @@ export function DashboardPage() {
             {displayedEvents.length > 0 && (
               <div className="eventFeedColHeader">
                 <span className="colTime">Waktu</span>
-                <span className="colBatch">Batch</span>
+                <span className="colBatch">Frame</span>
                 <span className="colGrade">Mutu</span>
                 <span className="colImp">Kotoran</span>
                 <span className="colConf">Akurasi</span>
@@ -1518,12 +1507,12 @@ export function DashboardPage() {
                     type="button"
                     className="eventFeedRow"
                     onClick={() => setSelectedCapture(item)}
-                    title={`Klik untuk melihat detail Batch #${item.id} (Grade MBS ${item.grade})`}
+                    title={`Klik untuk melihat detail Frame ${frameNumber(item.id)} (Grade MBS ${item.grade})`}
                   >
                     <span className="eventFeedTime">
-                      {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
-                    <span className="eventFeedId">#{item.id}</span>
+                    <span className="eventFeedId">{frameNumber(item.id)}</span>
                     <span className={`eventFeedGrade ${gradeColor}`}>MBS {item.grade}</span>
                     <div className="eventFeedImpWrapper">
                       <span className="eventFeedImpurity">{itemImpurity.toFixed(1)}%</span>
@@ -1586,7 +1575,7 @@ export function DashboardPage() {
                         <span className="cyclePickerTriggerText">
                           <strong>{selectedCycle.truckCode}</strong>
                           <span className="cyclePickerSubtext">
-                            {selectedCycle.totalCaptures || 0} Frame • {new Date(selectedCycle.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {selectedCycle.totalCaptures || 0} Frame • {new Date(selectedCycle.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit" })}
                           </span>
                         </span>
                         <span className={`cyclePickerGradePill grade-${(selectedCycle.finalDecision || "mbs").toLowerCase()}`}>
@@ -1682,7 +1671,7 @@ export function DashboardPage() {
                           lineCycles.map((cycle) => {
                             const isSelected = selectedCycleId === cycle.id;
                             const isActive = cycle.status === "active";
-                            const timeStr = new Date(cycle.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                            const timeStr = new Date(cycle.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit" });
                             const count = cycle.totalCaptures || 0;
                             const gradeCode = cycle.finalDecision || "MBS";
 
@@ -1777,12 +1766,12 @@ export function DashboardPage() {
                   </div>
                   <div className="cycleBannerMetaLine">
                     <span>
-                      Mulai: {new Date(selectedCycle.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                      Mulai: {new Date(selectedCycle.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
                     <span>•</span>
                     <span>
                       {selectedCycle.completedAt
-                        ? `Selesai: ${new Date(selectedCycle.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+                        ? `Selesai: ${new Date(selectedCycle.completedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
                         : "Siklus Sedang Berlangsung"}
                     </span>
                     <span>•</span>
@@ -1820,13 +1809,13 @@ export function DashboardPage() {
                     type="button"
                     className="capturePhotoCard"
                     onClick={() => setSelectedCapture(item)}
-                    title={`Batch #${item.id} — MBS ${item.grade}`}
+                    title={`Frame ${frameNumber(item.id)} — MBS ${item.grade}`}
                   >
                     <div className="photoThumb">
                       {item.snapshot ? (
                         <img
                           src={item.snapshot.startsWith("http") ? item.snapshot : `${backendUrl}${item.snapshot}`}
-                          alt={`Detection batch #${item.id}`}
+                          alt={`Detection frame ${frameNumber(item.id)}`}
                           className="photoThumbImg"
                         />
                       ) : (
@@ -1873,7 +1862,7 @@ export function DashboardPage() {
                               snapshotPath: item.snapshot ? (item.snapshot.startsWith("http") ? item.snapshot : `${backendUrl}${item.snapshot}`) : undefined
                             });
                           } else {
-                            if (confirm(`Hapus frame capture Batch #${item.id} secara langsung sebagai Direksi?`)) {
+                            if (confirm(`Hapus frame capture Frame ${frameNumber(item.id)} secara langsung sebagai Direksi?`)) {
                               await deleteInference(item.id);
                               if (selectedCapture?.id === item.id) setSelectedCapture(null);
                             }
@@ -1888,7 +1877,7 @@ export function DashboardPage() {
                     <div className="photoCardFooter">
                       <span className="photoTime">
                         <Clock size={9} />
-                        {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                        {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
                       <span className="photoConf">
                         Conf: {Math.round(item.confidence * 100)}%
@@ -2058,7 +2047,7 @@ export function DashboardPage() {
                   <div className="catGradeInfo">
                     <span className="catGradeLabel">
                       <Activity size={10} />
-                      <span>PREDICTED GRADE {effectiveInference && (effectiveInference as any).isCumulativeCycle ? `(RATA-RATA SIKLUS)` : ""}</span>
+                      <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `DOMINAN (${effectiveInference.cycleFrameCount} FRAME)` : "PREDICTED GRADE"}</span>
                     </span>
                     <div className={`catGradeValue grade-${normalizeGrade(grade).toLowerCase()}`}>
                       MBS {hasLatestInference ? normalizeGrade(grade) : "—"}
@@ -2288,7 +2277,7 @@ export function DashboardPage() {
                           <span className="dailyCycleIndex">#{item.number}</span>
                           <strong className="dailyCycleName">{item.code}</strong>
                           <span className="dailyCycleTime">
-                            {new Date(item.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(item.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                         <div className="dailyCycleItemRight">
@@ -2318,7 +2307,7 @@ export function DashboardPage() {
 
         const captureDate = new Date(selectedCapture.timestamp);
         const dateStr = captureDate.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-        const timeStr = captureDate.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const timeStr = captureDate.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
         return (
           <div
@@ -2337,7 +2326,7 @@ export function DashboardPage() {
                       <Camera size={15} />
                     </span>
                     <h2 id="modal-title">Detail Analisis Frame Capture</h2>
-                    <span className="modal-batch-pill">Batch #{selectedCapture.id}</span>
+                    <span className="modal-batch-pill">Frame {frameNumber(selectedCapture.id)}</span>
                   </div>
                   <p>Hasil pemindaian AI mutu tebu meja inspeksi • Standar Operasional PT Pabrik Gula Trangkil</p>
                 </div>
@@ -2361,7 +2350,7 @@ export function DashboardPage() {
                       <div className="snapshot-preview-container">
                         <img
                           src={selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`}
-                          alt={`Snapshot Batch #${selectedCapture.id}`}
+                          alt={`Snapshot Frame ${frameNumber(selectedCapture.id)}`}
                           className="snapshot-preview-img"
                         />
                         <div className="snapshot-overlay-top">
@@ -2391,7 +2380,7 @@ export function DashboardPage() {
                   <div className="capture-meta-strip">
                     <div className="meta-strip-item">
                       <span className="meta-label">ID RECORD</span>
-                      <strong className="meta-val">#{selectedCapture.id}</strong>
+                      <strong className="meta-val">{frameNumber(selectedCapture.id)}</strong>
                     </div>
                     <div className="meta-strip-item">
                       <span className="meta-label">SUMBER CCTV</span>
@@ -2540,7 +2529,7 @@ export function DashboardPage() {
                         snapshotPath: selectedCapture.snapshot ? (selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`) : undefined
                       });
                     } else {
-                      if (confirm(`Hapus frame capture Batch #${selectedCapture.id} secara langsung sebagai Direksi?`)) {
+                      if (confirm(`Hapus frame capture Frame ${frameNumber(selectedCapture.id)} secara langsung sebagai Direksi?`)) {
                         await deleteInference(selectedCapture.id);
                         setSelectedCapture(null);
                       }

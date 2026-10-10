@@ -25,7 +25,8 @@ app.addHook("onClose", async () => { await pool.end(); });
 await store.initialize();
 await auth.initialize();
 
-await app.register(cors, { origin: true });
+const allowedOrigins = new Set((process.env.PUBLIC_ORIGINS ?? "http://127.0.0.1:5175,http://localhost:5175,http://127.0.0.1:8080,http://localhost:8080,https://pgtrangkil.aisugarcanembs.com,https://pgmalang.aisugarcanembs.com").split(","));
+await app.register(cors, { origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)), credentials: true });
 await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 1 } });
 await app.register(websocket);
 
@@ -33,7 +34,7 @@ const access: Record<string, Permission> = {
   "GET /api/system/status": "dashboard.read", "GET /api/cameras": "camera.read", "POST /api/cameras": "camera.write",
   "PUT /api/cameras/:id": "camera.write", "DELETE /api/cameras/:id": "camera.write", "GET /api/models": "model.read",
   "POST /api/models/upload": "model.write", "POST /api/models/activate": "model.write",
-  "GET /api/inference/latest": "dashboard.read", "GET /api/inference/history": "history.read",
+  "GET /api/inference/latest": "dashboard.read", "GET /api/inference/history": "history.read", "GET /api/inference/model-frames": "dashboard.read",
   "GET /api/users": "user.read", "POST /api/users": "user.write", "PATCH /api/users/:id": "user.write",
   "POST /api/auth/verify-admin": "dashboard.read",
   "GET /api/deletion-requests": "dashboard.read",
@@ -54,12 +55,36 @@ const access: Record<string, Permission> = {
 
 app.addHook("preHandler", async (request, reply) => {
   const route = request.routeOptions.url;
+  if (route === "/api/auth/logout") return;
+  const isMedia = request.method === "GET" && ["/api/cameras/:id/stream", "/api/cameras/:id/snapshot", "/storage/snapshots/*"].includes(route ?? "");
+  if (isMedia) {
+    const cookieToken = request.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith("sugarcane_session="))?.slice("sugarcane_session=".length) ?? "";
+    const mediaUser = await auth.current(request.headers.authorization?.replace(/^Bearer /i, "") ?? cookieToken);
+    if (!mediaUser) return reply.code(401).send({ message: "Login diperlukan untuk mengakses media" });
+    if (!mediaUser.permissions.includes("camera.read")) return reply.code(403).send({ message: "Akses media ditolak" });
+    const factory = getFactoryFilter(mediaUser.username);
+    if (factory !== "all") {
+      const cameras = (await store.listCameras()).filter(camera => cameraInFactory(camera, factory));
+      const mediaParams = request.params as { id?: string; "*"?: string };
+      if (mediaParams.id && !cameras.some(camera => camera.id === Number(mediaParams.id))) return reply.code(403).send({ message: "Kamera berada di luar akses pabrik" });
+      if (mediaParams["*"]) {
+        const records = await store.listInference();
+        if (!records.some(record => record.snapshot === `/storage/snapshots/${mediaParams["*"]}` && cameras.some(camera => camera.id === record.cameraId))) return reply.code(403).send({ message: "Snapshot berada di luar akses pabrik" });
+      }
+    }
+    return;
+  }
   if (route === "/health" || route === "/api/auth/login" || route === "/ws" ||
-      (request.method === "GET" && ["/api/cameras/:id/stream", "/api/cameras/:id/snapshot", "/storage/snapshots/:filename"].includes(route ?? ""))) return;
+      (request.method === "GET" && ["/api/cameras/:id/stream", "/api/cameras/:id/snapshot", "/storage/snapshots/*"].includes(route ?? ""))) return;
 
   const token = request.headers.authorization?.replace(/^Bearer /i, "") ?? "";
   const user = await auth.current(token);
   if (!user) return reply.code(401).send({ message: "Sesi tidak valid atau telah berakhir" });
+  // Restore the media cookie for sessions created before cookie authentication.
+  if (!request.headers.cookie?.split(";").some(value => value.trim().startsWith("sugarcane_session="))) {
+    const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+    reply.header("Set-Cookie", `sugarcane_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800${secure}`);
+  }
   const key = `${request.method} ${request.routeOptions.url ?? request.url.split("?")[0]}`;
   if (key === "GET /api/auth/me") return;
   const permission = access[key];
@@ -122,12 +147,12 @@ app.get("/health", async () => ({ status: "ok", service: "backend" }));
 const snapshotsDir = fileURLToPath(new URL("../../../storage/snapshots/", import.meta.url));
 
 // Serve saved snapshot images
-app.get("/storage/snapshots/:filename", async (request, reply) => {
-  const { filename } = request.params as { filename: string };
-  const safeName = filename.replace(/[^a-zA-Z0-9_.-]/g, "");
+app.get("/storage/snapshots/*", async (request, reply) => {
+  const safeName = (request.params as { "*": string })["*"];
+  if (!safeName || safeName.split("/").some(part => !/^[a-zA-Z0-9_.-]+$/.test(part) || part === "." || part === "..")) return reply.code(400).send({ message: "Invalid snapshot path" });
   const filePath = join(snapshotsDir, safeName);
   try {
-    const file = await readFile(filePath);
+    const file = await readFile(filePath).catch(() => readFile(fileURLToPath(new URL(`../../ai-service/storage/snapshots/${safeName}`, import.meta.url))));
     reply.header("Content-Type", "image/jpeg");
     reply.header("Cache-Control", "public, max-age=86400");
     return reply.send(file);
@@ -146,7 +171,13 @@ app.post("/api/auth/login", async (request, reply) => {
 
   const session = await auth.login(parsed.data.username, parsed.data.password);
   if (!session) return reply.code(401).send({ message: "Username atau password salah" });
+  const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  reply.header("Set-Cookie", `sugarcane_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800${secure}`);
   return session;
+});
+app.post("/api/auth/logout", async (_request, reply) => {
+  reply.header("Set-Cookie", "sugarcane_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  return { ok: true };
 });
 app.get("/api/auth/me", async request => await currentUser(request.headers.authorization));
 
@@ -536,6 +567,7 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
   }
   if (!camera) return reply.code(404).send({ message: "Kamera tidak ditemukan" });
 
+  if ((await trucks.list()).some(cycle => cycle.line === id && cycle.status === "active")) return reply.code(409).send({ message: "Capture otomatis satu detik sedang berjalan; tidak perlu capture manual tambahan" });
   try {
     const aiRes = await fetch(`${config.aiServiceUrl}/infer`, {
       method: "POST",
@@ -546,19 +578,33 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
 
     if (!aiRes.ok) return reply.code(502).send({ message: "Gagal memproses inferensi AI" });
     const data = await aiRes.json() as {
-      classes: { daun: number; pucuk: number; sampah: number };
+      classes: { daun?: number; pucuk?: number; sampah?: number; A?: number; B?: number; T?: number };
       grade?: string;
+      detected_class?: string;
       confidence: number;
       snapshot_path: string;
       timestamp: string;
     };
 
-    const grade = calculateGrade(data.classes);
+    // Match the existing AI engine's A/B/T mapping used by its grading rule.
+    const classes = {
+      daun: data.classes.daun ?? data.classes.A,
+      pucuk: data.classes.pucuk ?? data.classes.B,
+      sampah: data.classes.sampah ?? data.classes.T,
+    };
+    const validatedClasses = z.object({
+      daun: z.number().finite().min(0).max(100),
+      pucuk: z.number().finite().min(0).max(100),
+      sampah: z.number().finite().min(0).max(100),
+    }).safeParse(classes);
+    if (!validatedClasses.success) return reply.code(502).send({ message: "Format keluaran kelas AI tidak valid" });
+    const grade = data.detected_class && ["S", "M", "A", "D", "B", "T", "G", "X"].includes(data.detected_class)
+      ? data.detected_class as import("./rule-engine.js").Grade : calculateGrade(validatedClasses.data);
 
     const added = await store.addInference({
       cameraId: id,
       grade,
-      classes: data.classes,
+      classes: validatedClasses.data,
       confidence: data.confidence,
       snapshot: `/${data.snapshot_path}`,
       timestamp: data.timestamp
@@ -640,9 +686,27 @@ app.get("/api/inference/latest", async (request) => {
 });
 
 app.get("/api/inference/history", async (request) => {
+  await store.syncModelCaptures();
   const user = await currentUser(request.headers.authorization);
   const factory = user ? getFactoryFilter(user.username) : "all";
   const history = await store.listInference();
+  if (factory === "all") return history;
+  const allCameras = await store.listCameras();
+  const allowedCameraIds = new Set(
+    allCameras
+      .filter(c => {
+        const t = `${c.name} ${c.location}`.toLowerCase();
+        return factory === "kebonagung" ? (t.includes("kebon agung") || t.includes("malang")) : t.includes("trangkil");
+      })
+      .map(c => c.id)
+  );
+  return history.filter(item => allowedCameraIds.has(item.cameraId));
+});
+
+app.get("/api/inference/model-frames", async (request) => {
+  const user = await currentUser(request.headers.authorization);
+  const factory = user ? getFactoryFilter(user.username) : "all";
+  const history = await store.listModelFrames();
   if (factory === "all") return history;
   const allCameras = await store.listCameras();
   const allowedCameraIds = new Set(
@@ -710,13 +774,16 @@ app.post("/api/truck-inspections", async (request, reply) => {
 
   // Notify AI Engine in database sugarcane_ai to start cycle scanning
   try {
-    await fetch(`${config.aiServiceUrl}/cycle/start`, {
+    const started = await fetch(`${config.aiServiceUrl}/cycle/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ camera_id: camera.id, cycle_code: created.id })
+      body: JSON.stringify({ camera_id: camera.id, cycle_code: created.id }),
+      signal: AbortSignal.timeout(30000)
     });
+    if (!started.ok) throw new Error(`AI start failed: ${started.status}`);
   } catch (err) {
-    console.error("Failed to trigger AI Engine cycle/start:", err);
+    await trucks.delete(created.id);
+    return reply.code(502).send({ message: "AI service gagal memulai siklus", detail: String(err) });
   }
 
   broadcast("truck.created", created);
@@ -731,20 +798,24 @@ app.patch("/api/truck-inspections/:id/complete", async (request, reply) => {
   if (!z.string().uuid().safeParse(id).success) return reply.code(400).send({ message: "ID inspeksi tidak valid" });
   const parsed = z.object({ notes: z.string().max(2000).optional() }).safeParse(request.body ?? {});
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-  const completed = await trucks.complete(id, parsed.data.notes);
-  if (!completed) return reply.code(404).send({ message: "Inspeksi aktif tidak ditemukan" });
+  const active = await trucks.get(id);
+  if (!active || active.status !== "active") return reply.code(404).send({ message: "Inspeksi aktif tidak ditemukan" });
 
   // Notify AI Engine in database sugarcane_ai to stop cycle scanning & aggregate ai_results
   try {
-    await fetch(`${config.aiServiceUrl}/cycle/stop`, {
+    const stopped = await fetch(`${config.aiServiceUrl}/cycle/stop`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cycle_code: id })
+      body: JSON.stringify({ cycle_code: id }),
+      signal: AbortSignal.timeout(35000)
     });
+    if (!stopped.ok) throw new Error(`AI stop failed: ${stopped.status}`);
   } catch (err) {
-    console.error("Failed to trigger AI Engine cycle/stop:", err);
+    return reply.code(502).send({ message: "AI service belum berhasil menghentikan siklus; ulangi Stop", detail: String(err) });
   }
 
+  await store.syncModelCaptures();
+  const completed = await trucks.complete(id, parsed.data.notes);
   broadcast("truck.completed", completed);
   return completed;
 });
@@ -798,5 +869,18 @@ app.delete("/api/truck-inspections/:id", async (request, reply) => {
   return { ok: true };
 });
 
+if (process.env.API_TEST_MODE !== "true") {
+  await store.syncModelCaptures();
+  let syncRunning = false;
+  const syncTimer = setInterval(async () => {
+    if (syncRunning) return;
+    syncRunning = true;
+    try { if (await store.syncModelCaptures()) broadcast("inference.synced", {}); }
+    catch (error) { app.log.error(error, "AI capture synchronization failed"); }
+    finally { syncRunning = false; }
+  }, 1000);
+  syncTimer.unref();
+  app.addHook("onClose", async () => clearInterval(syncTimer));
+}
 export { app };
 if (process.env.API_TEST_MODE !== "true") await app.listen({ host: config.host, port: config.port });

@@ -8,7 +8,8 @@ import { PoweredByWatermark } from "./components/shared/PoweredByWatermark";
 import { AccessManagement } from "./components/AccessManagement";
 const trangkilLogoSvg = "./logo-pg-trangkil.svg";
 
-const websocketUrl = window.sugarcaneDesktop?.websocketUrl ?? import.meta.env.VITE_WS_URL ?? "ws://127.0.0.1:4110/ws";
+const configuredWebsocket = import.meta.env.VITE_WS_URL;
+const websocketUrl = window.sugarcaneDesktop?.websocketUrl ?? (configuredWebsocket && configuredWebsocket !== "same-origin" ? configuredWebsocket : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`);
 
 const tabs = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },

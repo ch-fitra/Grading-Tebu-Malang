@@ -18,13 +18,14 @@ test("API and PostgreSQL regression checks in an isolated schema", async t => {
   databaseUrl.searchParams.set("options", `-c search_path=${schema}`);
   process.env.DATABASE_URL = databaseUrl.href;
   process.env.API_TEST_MODE = "true";
+  process.env.AI_DATABASE_URL = ""; // Keep this suite isolated from live AI frames.
   process.env.NODE_ENV = "test";
   process.env.APP_DEVELOPER_PASSWORD = "regression-developer";
   process.env.APP_ADMIN_PASSWORD = "regression-admin";
   process.env.JWT_SECRET = "isolated-regression-secret";
   const ai = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
-    res.statusCode = req.url?.includes("/roi") ? 422 : 503;
+    res.statusCode = req.url?.startsWith("/cycle/") ? 200 : req.url?.includes("/roi") ? 422 : 503;
     res.end(JSON.stringify({ detail: "isolated test AI" }));
   });
   await new Promise<void>(resolve => ai.listen(0, "127.0.0.1", resolve));
@@ -93,8 +94,8 @@ test("API and PostgreSQL regression checks in an isolated schema", async t => {
       assert.equal(response.statusCode, 404);
       assert.equal((await db.query("SELECT truck_code FROM truck_inspections WHERE id=$1", [truck.id])).rows[0].truck_code, "regression");
     });
-    await t.test("completion persists captures, empty notes, and the measured decision", async () => {
-      await store.addInference({ cameraId: 2, classes: { daun: 6, pucuk: 3, sampah: 3 }, grade: "D", confidence: 0.9, timestamp: new Date(Date.now() + 10).toISOString(), snapshot: null });
+    await t.test("completion uses detected B for the decision even at 100 percent impurity", async () => {
+      await store.addInference({ cameraId: 2, classes: { daun: 100, pucuk: 0, sampah: 0 }, grade: "B", confidence: 0.9, timestamp: new Date(Date.now() + 10).toISOString(), snapshot: null });
       await new Promise(resolve => setTimeout(resolve, 25));
       const response = await request("PATCH", `/api/truck-inspections/${truck.id}/complete`, { notes: "" });
       assert.equal(response.statusCode, 200);

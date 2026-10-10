@@ -16,8 +16,19 @@ Set-Location $root
 Require-Success "Instalasi dependensi"
 
 Write-Host "[1/3] Memeriksa PostgreSQL..." -ForegroundColor Cyan
-$postgresRunning = $null -ne (Get-NetTCPConnection -LocalPort 5432 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
+$databaseUrl = $env:DATABASE_URL
+if ([string]::IsNullOrWhiteSpace($databaseUrl) -and (Test-Path .env)) {
+  $databaseLine = Get-Content .env | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1
+  if ($databaseLine) { $databaseUrl = ($databaseLine -replace '^DATABASE_URL=', '').Trim().Trim('"', "'") }
+}
+$databasePort = 5432
+if ($databaseUrl) {
+  $databaseUri = [Uri]$databaseUrl
+  if ($databaseUri.Port -gt 0) { $databasePort = $databaseUri.Port }
+}
+$postgresRunning = $null -ne (Get-NetTCPConnection -LocalPort $databasePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
 if (-not $postgresRunning) {
+  if ($databasePort -ne 5432) { throw "PostgreSQL port $databasePort belum berjalan. Nyalakan service database sesuai DATABASE_URL." }
   & docker compose up -d postgres
   Require-Success "PostgreSQL"
   for ($attempt = 1; $attempt -le 30; $attempt++) {

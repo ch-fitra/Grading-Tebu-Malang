@@ -1,4 +1,4 @@
-export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
+export type Grade = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 
 export type InferenceResult = {
   conveyorEmpty?: boolean;
@@ -6,6 +6,7 @@ export type InferenceResult = {
   timestamp: string;
   cameraId: number;
   classes: { daun: number; pucuk: number; sampah: number };
+  classScores?: Partial<Record<Grade, number>>;
   grade: Grade;
   confidence: number;
   snapshot: string | null;

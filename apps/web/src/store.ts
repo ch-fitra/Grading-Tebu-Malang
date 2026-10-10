@@ -73,6 +73,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refresh();
   },
   logout: () => {
+    void api("/api/auth/logout", { method: "POST" }).catch(() => {});
     localStorage.removeItem("tebu-session");
     set({ session: null, latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [] });
   },

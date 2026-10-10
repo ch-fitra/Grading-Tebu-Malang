@@ -1,4 +1,4 @@
-export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
+export type Grade = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 
 export type ClassPercentages = {
   daun?: number;

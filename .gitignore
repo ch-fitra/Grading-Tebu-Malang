@@ -24,3 +24,5 @@ apps/ai-service/models/active/*.keras
 apps/ai-service/models/active/*.h5
 apps/ai-service/models/active/*.pt
 apps/ai-service/models/active/*.onnx
+apps/ai-service/storage/snapshots/
+.runtime/

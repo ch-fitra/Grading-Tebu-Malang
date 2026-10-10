@@ -90,9 +90,13 @@ def load_all_rois() -> Dict[int, ROIModel]:
     # Try loading from DB sugarcane_ai first
     try:
         from db.repository import AIRepository
-        db_roi = AIRepository.get_camera_roi(1)
-        if db_roi:
-            _CACHED_ROIS = {1: ROIModel(**db_roi)}
+        cameras = AIRepository.get_active_cameras()
+        db_rois = {
+            int(camera["id"]): ROIModel(**{**camera["roi_config"], "camera_id": int(camera["id"])})
+            for camera in cameras if camera.get("roi_config")
+        }
+        if db_rois:
+            _CACHED_ROIS = db_rois
             return _CACHED_ROIS
     except Exception as e:
         logger.warning(f"Could not load ROI from DB sugarcane_ai: {e}")

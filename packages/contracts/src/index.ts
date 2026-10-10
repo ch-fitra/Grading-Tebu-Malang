@@ -1,4 +1,4 @@
-export type Grade = "S" | "M" | "A" | "D" | "B" | "G" | "X";
+export type Grade = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 export type CameraStatus = "online" | "offline";
 export type TruckDecision = "MBS" | "NON_MBS" | "DITOLAK_DO" | "PENDING";
 
@@ -23,6 +23,7 @@ export interface InferenceResult {
   timestamp: string;
   cameraId: number;
   classes: { daun: number; pucuk: number; sampah: number };
+  classScores?: Partial<Record<Grade, number>>;
   grade: Grade;
   confidence: number;
   snapshot: string | null;

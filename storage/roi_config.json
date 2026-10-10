@@ -1,26 +1,26 @@
 {
   "1": {
-    "camera_id": 1,
-    "enabled": true,
     "x": 0.14,
     "y": 0.14,
+    "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)",
     "width": 0.74,
     "height": 0.66,
-    "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)",
+    "enabled": true,
+    "camera_id": 1,
     "show_grid": true,
-    "show_telemetry": true,
-    "show_scrim": true
+    "show_scrim": true,
+    "show_telemetry": true
   },
   "2": {
-    "camera_id": 2,
+    "x": 0.58,
+    "y": 0.08,
+    "label": "ROI: MEJA TEBU 2 (PG KEBON AGUNG)",
+    "width": 0.39,
+    "height": 0.62,
     "enabled": true,
-    "x": 0.1,
-    "y": 0.12,
-    "width": 0.8,
-    "height": 0.76,
-    "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)",
+    "camera_id": 2,
     "show_grid": true,
-    "show_telemetry": true,
-    "show_scrim": true
+    "show_scrim": true,
+    "show_telemetry": true
   }
 }

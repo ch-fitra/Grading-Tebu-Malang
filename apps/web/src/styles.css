@@ -9060,7 +9060,7 @@ main.dashboardMainFixed {
 }
 
 .mbsGradesGrid.mode-2rows .mbsGradeCard:nth-child(n+5) {
-  grid-column: span 4; /* Row 2: 3 cards x 4 cols = 12 cols */
+  grid-column: span 3; /* Row 2: B, T, G, X */
 }
 
 /* ── Common Compact Landscape MBS Grade Card Structure ── */
@@ -11017,7 +11017,7 @@ main.dashboardMainFixed {
 
 .cycleConsMiniBars {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 2.5px;
   margin-top: 1px;
 }
@@ -16165,3 +16165,11 @@ main.dashboardMainFixed {
   box-shadow: 0 0 5px rgba(217, 119, 6, 0.5);
 }
 
+
+.grade-t, .badge-t { color: #9333ea; }
+
+.mbsGradeBadge.badge-t {
+  background: linear-gradient(135deg, #7e22ce, #a855f7);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}

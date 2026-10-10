@@ -1,6 +1,6 @@
 {
   "name": "Sugarcane Quality Keras Model",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "classification",
   "input_size": 224,
   "classes": [
@@ -12,7 +12,7 @@
     "T"
   ],
   "threshold": 0.5,
-  "output_activation": "probabilities",
+  "output_activation": "softmax",
   "input_color": "rgb",
   "model_path": "apps/ai-service/models/active/v0.0.1.sugarcane.keras"
 }

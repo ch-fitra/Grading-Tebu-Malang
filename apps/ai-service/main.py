@@ -16,6 +16,7 @@ os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
 try:
     import torch
     torch._dynamo.config.suppress_errors = True
+    torch.set_num_threads(2)
 except Exception:
     pass
 
@@ -139,8 +140,8 @@ def load_config() -> ModelConfig:
 
 
 # Auto-register Default Cameras on startup
-DEFAULT_KEBONAGUNG_RTSP = "rtsp://admin:qc_12345@123.255.202.132:10554/Streaming/Channels/101"
-DEFAULT_TRANGKIL_WISENET_RTSP = "rtsp://admin:XNOAdmin123@192.168.33.86:554/profile2/media.smp"
+DEFAULT_KEBONAGUNG_RTSP = os.getenv("CCTV_KEBONAGUNG_RTSP_URL", "")
+DEFAULT_TRANGKIL_WISENET_RTSP = os.getenv("CCTV_TRANGKIL_RTSP_URL", "")
 
 _session_lock = threading.Lock()
 _session_key = None
@@ -157,12 +158,18 @@ def configured_model_path(config: ModelConfig) -> Path:
 def model_session(config: ModelConfig):
     global _session, _session_key
     path = configured_model_path(config)
-    if ort is None or not path.is_file():
-        raise HTTPException(status_code=503, detail="Model ONNX belum tersedia atau onnxruntime belum terpasang")
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="File model belum tersedia")
     key = (str(path), path.stat().st_mtime_ns)
     with _session_lock:
         if _session_key != key:
-            candidate = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+            if path.suffix.lower() in [".keras", ".h5"]:
+                import keras
+                candidate = keras.models.load_model(str(path), compile=False)
+            else:
+                if ort is None:
+                    raise HTTPException(status_code=503, detail="onnxruntime belum terpasang")
+                candidate = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
             _session = candidate
             _session_key = key
         return _session
@@ -238,13 +245,15 @@ def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[
     # If model is .keras / .h5, handle via Keras runner
     if path.suffix.lower() in [".keras", ".h5"]:
         try:
-            import keras
-            keras_model = keras.models.load_model(str(path))
+            keras_model = model_session(config)
             resized = cv2.resize(image, (config.input_size, config.input_size))
             if config.input_color == "rgb":
                 resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             tensor = np.expand_dims(resized.astype("float32"), axis=0)
-            preds = keras_model.predict(tensor, verbose=0)
+            with torch.no_grad():
+                preds = keras_model(tensor, training=False)
+                if hasattr(preds, "detach"):
+                    preds = preds.detach().cpu().numpy()
             if config.type == "classification":
                 return classification_measurement(preds, config)
             return segmentation_measurement(preds, config)
@@ -410,7 +419,11 @@ def _generate_synthetic_sugarcane_frame() -> np.ndarray:
 def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event):
     logger.info(f"Started autonomous background cycle scan worker for {cycle_code} (camera #{camera_id})")
     frame_idx = 0
+    next_capture = time.monotonic()
     while not stop_event.is_set():
+        if stop_event.wait(max(0.0, next_capture - time.monotonic())):
+            break
+        next_capture += 1.0
         try:
             config = load_config()
             stream = stream_manager.get_stream(camera_id)
@@ -422,16 +435,9 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             image = stream.get_roi_crop(roi) if (roi and roi.enabled and stream and stream.is_connected) else (stream.get_raw_frame() if stream else None)
 
             if image is None:
-                # Fallback to synthetic conveyor frame when offline / connecting
-                full_synthetic = _generate_synthetic_sugarcane_frame()
-                if roi and roi.enabled:
-                    h, w = full_synthetic.shape[:2]
-                    x1, y1 = max(0, int(roi.x * w)), max(0, int(roi.y * h))
-                    x2, y2 = min(w, int((roi.x + roi.width) * w)), min(h, int((roi.y + roi.height) * h))
-                    image = full_synthetic[y1:y2, x1:x2].copy()
-                else:
-                    image = full_synthetic
+                raise RuntimeError("CCTV frame unavailable; no detection was saved")
 
+            captured_at = datetime.now(timezone.utc).isoformat()
             frame_idx += 1
             snapshot_filename = f"frame_{frame_idx:04d}_{uuid4().hex[:6]}.jpg"
             cycle_folder = SNAPSHOTS_DIR / cycle_code
@@ -440,7 +446,8 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             rel_snapshot_path = f"storage/snapshots/{cycle_code}/{snapshot_filename}"
 
             classes, confidence = run_onnx_inference(image, config)
-            cv2.imwrite(str(snapshot_path), image)
+            if not cv2.imwrite(str(snapshot_path), image):
+                raise RuntimeError("Failed to persist cycle snapshot")
 
             mapped_scores = {
                 "S": round(float(classes.get("S", 0.0)), 2),
@@ -461,7 +468,7 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             _, encoded_jpg = cv2.imencode(".jpg", image)
             image_bytes = encoded_jpg.tobytes() if encoded_jpg is not None else None
 
-            AIRepository.save_inference_result(
+            result_id = AIRepository.save_inference_result(
                 camera_id=camera_id,
                 model_version=config.version,
                 snapshot_path=rel_snapshot_path,
@@ -471,12 +478,18 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
                 confidence=confidence,
                 image_blob=image_bytes,
                 cycle_id=cycle_id,
-                cycle_code=cycle_code
+                cycle_code=cycle_code,
+                captured_at=captured_at
             )
+            if result_id is None:
+                snapshot_path.unlink(missing_ok=True)
+                raise RuntimeError("Failed to persist cycle detection in database")
         except Exception as e:
             logger.error(f"Error in background cycle scan frame processing for {cycle_code}: {e}")
 
-        stop_event.wait(1.0)
+        # Skip missed slots rather than emitting a burst of duplicate captures.
+        if next_capture < time.monotonic():
+            next_capture += int(time.monotonic() - next_capture) + 1
 
     logger.info(f"Stopped background cycle scan worker for {cycle_code}")
 
@@ -484,6 +497,12 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
 @app.post("/cycle/start")
 def start_cycle(payload: StartCycleRequest):
     config = load_config()
+    # Load/warm the model before starting the one-second acquisition clock.
+    stream = stream_manager.get_stream(payload.camera_id)
+    image = stream.get_raw_frame() if stream else None
+    if image is None:
+        raise HTTPException(status_code=503, detail="CCTV is not connected")
+    run_onnx_inference(image, config)
     result = AIRepository.start_cycle(
         camera_id=payload.camera_id,
         model_version=config.version,
@@ -519,7 +538,9 @@ def stop_cycle(payload: StopCycleRequest):
         if payload.cycle_code in _active_cycle_workers:
             stop_event, thread = _active_cycle_workers.pop(payload.cycle_code)
             stop_event.set()
-            thread.join(timeout=2.0)
+            thread.join(timeout=30.0)
+            if thread.is_alive():
+                raise HTTPException(status_code=503, detail="Capture is still finishing; retry stop")
 
     result = AIRepository.stop_cycle(payload.cycle_code)
     if not result:
@@ -616,8 +637,13 @@ def infer(payload: InferRequest):
         confidence=confidence,
         image_blob=image_bytes,
         cycle_id=payload.cycle_id,
-        cycle_code=payload.cycle_code
+        cycle_code=payload.cycle_code,
+        captured_at=captured_at
     )
+
+    if result_id is None:
+        snapshot_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=503, detail="Failed to persist detection in database")
 
     return {
         "id": result_id,

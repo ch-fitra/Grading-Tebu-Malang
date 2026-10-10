@@ -1,3 +1,4 @@
+import { dominantGrade } from "../utils/grade-data";
 import { useState } from "react";
 import {
   X,
@@ -112,7 +113,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
   };
 
   // Evaluasi grade hasil akhir dari rata-rata kotoran sesi truk ini
-  const finalGradeCode = getGradeFromImpurity(session.averageImpurity);
+  const finalGradeCode = dominantGrade(sessionCaptures) ?? "M";
   const curGradeConfig: TrangkilGradeItem = TRANGKIL_GRADES.find(g => g.code === finalGradeCode) || TRANGKIL_GRADES[1];
   const mbsInfo = resolveMbsInfo(session.line, session.truckCode);
 
@@ -195,7 +196,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               {/* 4 Metrik Ringkasan Utama */}
               <div className="truck-hero-metrics-grid">
                 <div className="truck-metric-item">
-                  <span className="truck-metric-label">Total Siklus:</span>
+                  <span className="truck-metric-label">Total Frame:</span>
                   <strong className="truck-metric-val">{session.totalCaptures} Frame</strong>
                 </div>
                 <div className="truck-metric-item">
@@ -248,7 +249,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                 <div className="truck-meta-item">
                   <span className="truck-meta-key">Waktu Mulai</span>
                   <strong className="truck-meta-val">
-                    {new Date(session.startedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    {new Date(session.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     <small> ({new Date(session.startedAt).toLocaleDateString("id-ID")})</small>
                   </strong>
                 </div>
@@ -256,7 +257,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                   <span className="truck-meta-key">Waktu Selesai (Durasi)</span>
                   <strong className="truck-meta-val">
                     {session.completedAt 
-                      ? `${new Date(session.completedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} (${getDuration()})`
+                      ? `${new Date(session.completedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })} (${getDuration()})`
                       : `Berlangsung (${getDuration()})`}
                   </strong>
                 </div>
@@ -310,7 +311,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               <div className="truck-card-title-bar no-margin">
                 <Layers size={13} />
                 <h4>
-                  LOG SIKLUS DETEKSI ({filteredCaptures.length}
+                  LOG FRAME DETEKSI ({filteredCaptures.length}
                   {filteredCaptures.length !== sortedCaptures.length ? ` / ${sortedCaptures.length}` : ""} Frame)
                 </h4>
               </div>
@@ -384,7 +385,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                   <table className="truck-cycles-log-table">
                     <thead>
                       <tr>
-                        <th style={{ width: "95px" }}>Siklus</th>
+                        <th style={{ width: "95px" }}>Frame</th>
                         <th style={{ width: "105px" }}>Waktu</th>
                         <th style={{ width: "115px" }}>Mutu AI</th>
                         <th style={{ width: "110px" }}>Kotoran</th>
@@ -394,7 +395,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                     </thead>
                     <tbody>
                       {visibleCaptures.map((item, index) => {
-                        const cycleNumber = (pageIndex - 1) * pageSize + index + 1;
+                        const cycleNumber = sortedCaptures.findIndex(frame => frame.id === item.id) + 1;
                         const impurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                         const normGrade = normalizeGrade(item.grade);
                         const rowGradeDef = TRANGKIL_GRADES.find(g => g.code === normGrade) || TRANGKIL_GRADES[1];
@@ -403,12 +404,12 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                           <tr key={item.id} className="truck-cycle-row">
                             <td>
                               <span className="cycle-badge">
-                                #{cycleNumber}
+                                {cycleNumber}
                               </span>
                             </td>
                             <td>
                               <span className="cycle-time-text">
-                                {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                                {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                               </span>
                             </td>
                             <td>

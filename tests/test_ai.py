@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +19,53 @@ from streamer import CameraStream, ROIModel
 
 
 class AIRegressionTests(unittest.TestCase):
+    def test_cycle_captures_once_per_second_and_saves_each_file(self):
+        import threading
+        stop = threading.Event()
+        timestamps = []
+        paths = []
+        image = np.zeros((20, 20, 3), dtype=np.uint8)
+        stream = types.SimpleNamespace(is_connected=True, get_raw_frame=lambda: image)
+        def inference(*args):
+            time.sleep(0.12)  # Processing time must not be added to the 1-second cadence.
+            return {"B": 100}, 1.0
+        def save(**kwargs):
+            timestamps.append(time.monotonic())
+            paths.append(kwargs["snapshot_path"])
+            if len(paths) == 4:
+                stop.set()
+            return len(paths)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(main, "SNAPSHOTS_DIR", Path(directory)), \
+             patch.object(main, "load_config", return_value=types.SimpleNamespace(version="test")), \
+             patch.object(main.stream_manager, "get_stream", return_value=stream), \
+             patch.object(main, "load_all_rois", return_value={}), \
+             patch.object(main, "run_onnx_inference", side_effect=inference), \
+             patch.object(main.AIRepository, "save_inference_result", side_effect=save):
+            main._cycle_scan_worker("test-cycle", 1, 1, stop)
+            self.assertEqual(len(paths), 4)
+            self.assertEqual(len(list(Path(directory).rglob("*.jpg"))), 4)
+            for before, after in zip(timestamps, timestamps[1:]):
+                self.assertAlmostEqual(after - before, 1.0, delta=0.15)
+
+    def test_keras_session_loads_without_onnx_and_reuses_loaded_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_path = Path(directory) / "model.keras"
+            model_path.write_bytes(b"mock model")
+            candidate = object()
+            from unittest.mock import Mock
+            loader = Mock(return_value=candidate)
+            fake_keras = types.SimpleNamespace(models=types.SimpleNamespace(load_model=loader))
+            with patch.object(main, "configured_model_path", return_value=model_path), \
+                 patch.object(main, "ort", None), \
+                 patch.object(main, "_session_key", None), \
+                 patch.object(main, "_session", None), \
+                 patch.dict(sys.modules, {"keras": fake_keras}):
+                config = main.load_config()
+                self.assertIs(main.model_session(config), candidate)
+                self.assertIs(main.model_session(config), candidate)
+                loader.assert_called_once_with(str(model_path), compile=False)
+
     def test_import_does_not_start_camera_workers(self):
         self.assertEqual(main.stream_manager.streams, {})
 
@@ -75,7 +123,7 @@ class AIRegressionTests(unittest.TestCase):
                 return np.zeros((20, 20, 3), dtype=np.uint8)
 
         with tempfile.TemporaryDirectory() as temporary:
-            with patch.object(main, "SNAPSHOTS_DIR", Path(temporary)), patch.object(main.stream_manager, "get_stream", return_value=FakeStream()), patch.object(main, "run_onnx_inference", return_value=({"daun": 1.0, "pucuk": 0.0, "sampah": 0.0}, 0.9)):
+            with patch.object(main, "SNAPSHOTS_DIR", Path(temporary)), patch.object(main.stream_manager, "get_stream", return_value=FakeStream()), patch.object(main.AIRepository, "save_inference_result", return_value=1), patch.object(main, "run_onnx_inference", return_value=({"daun": 1.0, "pucuk": 0.0, "sampah": 0.0}, 0.9)):
                 payload = main.InferRequest(camera_id=9, crop_roi=False)
                 a, b = main.infer(payload), main.infer(payload)
                 self.assertNotEqual(a["snapshot_path"], b["snapshot_path"])

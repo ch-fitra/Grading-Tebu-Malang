@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import psycopg2
 from db.connection import AI_DB_URL, get_ai_db_connection
 
@@ -123,9 +124,9 @@ def run_ai_migrations():
             cursor.execute("""
                 INSERT INTO ai_cameras (id, camera_code, name, rtsp_url, location, roi_config)
                 VALUES 
-                (1, 'CAM_TRANGKIL_5', 'MBS 5 - PT Trangkil (Wisenet Meja 5)', 'rtsp://admin:XNOAdmin123@192.168.33.86:554/profile2/media.smp', 'Meja Tebu 5', '{"camera_id": 1, "enabled": true, "x": 0.14, "y": 0.14, "width": 0.74, "height": 0.66, "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)", "show_grid": true, "show_telemetry": true, "show_scrim": true}'::jsonb)
-                ON CONFLICT (id) DO UPDATE SET roi_config = EXCLUDED.roi_config;
-            """)
+                (1, 'CAM_TRANGKIL_5', 'MBS 5 - PT Trangkil (Wisenet Meja 5)', %s, 'Meja Tebu 5', '{"camera_id": 1, "enabled": true, "x": 0.14, "y": 0.14, "width": 0.74, "height": 0.66, "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)", "show_grid": true, "show_telemetry": true, "show_scrim": true}'::jsonb)
+                ON CONFLICT (id) DO NOTHING;
+            """, (os.getenv("CCTV_TRANGKIL_RTSP_URL", ""),))
 
             # Seed Default AI Model if empty (Keras model uploaded by user)
             cursor.execute("""
