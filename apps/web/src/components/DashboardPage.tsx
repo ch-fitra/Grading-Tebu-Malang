@@ -1,3 +1,4 @@
+import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
 import { Cpu, Clock, Camera, Radio, Activity, CheckCircle, CheckCircle2, AlertTriangle, Shield, ShieldCheck, ShieldAlert, Crown, Layers, VideoOff, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, Wifi, WifiOff, TrendingUp, BarChart3, Leaf, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -89,208 +90,8 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-export type TrangkilGradeCode = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
-
-export interface GradeVariationLine {
-  label: string;
-  value: string;
-  status: "good" | "warn" | "danger";
-}
-
-export interface TrangkilGradeItem {
-  code: TrangkilGradeCode;
-  label: string;
-  name: string;
-  tol: string;
-  rafaksi: string;
-  status: string;
-  statusCls: string;
-  badgeCls: string;
-  img: string;
-  color: string;
-  grad: string;
-  kriteria: string;
-  decision: string;
-  tier: "bebas" | "rafaksi" | "tolak";
-  variasi: GradeVariationLine[];
-}
-
-export const TRANGKIL_GRADES: TrangkilGradeItem[] = [
-  {
-    code: "S",
-    label: "MBS S",
-    name: "Super (Non-Kotor)",
-    tol: "< 1% – 2%",
-    rafaksi: "0% (Bebas)",
-    status: "Lolos Prima",
-    statusCls: "s",
-    badgeCls: "badge-s",
-    img: "/grades/mbs-s.jpg",
-    color: "#2563eb",
-    grad: "linear-gradient(90deg, #1d4ed8, #00d2ff)",
-    kriteria: "Tebu super bersih, bebas daun & pucuk. Lolos langsung giling tanpa potongan bobot.",
-    decision: "✓ Lolos Giling (Mutu Prima)",
-    tier: "bebas",
-    variasi: [
-      { label: "Daduk Kering", value: "< 0.5% (Bebas Daun)", status: "good" },
-      { label: "Pucuk Hijau", value: "< 1.0% (Potong Rapi)", status: "good" },
-      { label: "Sampah/Batu", value: "0.0% (Nol Toleransi)", status: "good" },
-    ]
-  },
-  {
-    code: "M",
-    label: "MBS M",
-    name: "Stempel Simbol M",
-    tol: "2% – 5%",
-    rafaksi: "0% (Bebas)",
-    status: "Standar Ideal",
-    statusCls: "m",
-    badgeCls: "badge-m",
-    img: "/grades/mbs-m.jpg",
-    color: "#0284c7",
-    grad: "linear-gradient(90deg, #0284c7, #38bdf8)",
-    kriteria: "Standar ideal PG Trangkil (Simbol M). Bersih optimal dengan kotoran serpihan minimal.",
-    decision: "✓ Lolos Giling (Standar Utama M)",
-    tier: "bebas",
-    variasi: [
-      { label: "Daduk Kering", value: "1.0% – 2.0% (Serpihan Tipis)", status: "good" },
-      { label: "Pucuk Hijau", value: "1.0% – 2.5% (Standar M)", status: "good" },
-      { label: "Sampah/Tanah", value: "< 0.5% (Debu Meja Saja)", status: "good" },
-    ]
-  },
-  {
-    code: "A",
-    label: "MBS A",
-    name: "Stempel Simbol A",
-    tol: "6% – 10%",
-    rafaksi: "0% (Bebas)",
-    status: "Toleransi Giling",
-    statusCls: "a",
-    badgeCls: "badge-a",
-    img: "/grades/mbs-a.jpg",
-    color: "#059669",
-    grad: "linear-gradient(90deg, #059669, #34d399)",
-    kriteria: "Batas toleransi layak giling (Simbol A). Terdapat daun ringan tanpa sanksi bobot.",
-    decision: "✓ Lolos Toleransi Giling (Simbol A)",
-    tier: "bebas",
-    variasi: [
-      { label: "Daduk Kering", value: "3.0% – 5.0% (Daun Ringan)", status: "good" },
-      { label: "Pucuk Hijau", value: "2.0% – 4.0% (Toleransi Masuk)", status: "good" },
-      { label: "Sampah/Tanah", value: "< 1.0% (Sedimen Halus)", status: "good" },
-    ]
-  },
-  {
-    code: "D",
-    label: "MBS D",
-    name: "Potongan Bobot 1%",
-    tol: "11% – 15%",
-    rafaksi: "-1,0% Bobot",
-    status: "Pengawasan",
-    statusCls: "d",
-    badgeCls: "badge-d",
-    img: "/grades/mbs-d.jpg",
-    color: "#d97706",
-    grad: "linear-gradient(90deg, #d97706, #fbbf24)",
-    kriteria: "Kotoran sedang (daun tebal / pucuk panjang). Diterima dengan sanksi potongan bobot 1%.",
-    decision: "⚠ Diterima Rafaksi Ringan (-1%)",
-    tier: "rafaksi",
-    variasi: [
-      { label: "Daduk Kering", value: "5.0% – 8.0% (Daun Tebal)", status: "warn" },
-      { label: "Pucuk Hijau", value: "4.0% – 6.0% (Pucuk Masih Ada)", status: "warn" },
-      { label: "Sampah/Tanah", value: "1.0% – 2.0% (Ada Kerikil)", status: "warn" },
-    ]
-  },
-  {
-    code: "B",
-    label: "MBS B",
-    name: "Potongan Bobot 2,5%",
-    tol: "16% – 20%",
-    rafaksi: "-2,5% Bobot",
-    status: "Sortir Meja",
-    statusCls: "b",
-    badgeCls: "badge-b",
-    img: "/grades/mbs-b.jpg",
-    color: "#ea580c",
-    grad: "linear-gradient(90deg, #ea580c, #fb923c)",
-    kriteria: "Kotoran tinggi (banyak daduk & tanah). Diterima dengan sanksi potongan bobot 2,5%.",
-    decision: "⚠ Diterima Rafaksi Berat (-2.5%)",
-    tier: "rafaksi",
-    variasi: [
-      { label: "Daduk Kering", value: "8.0% – 10.0% (Daun Lebat)", status: "warn" },
-      { label: "Pucuk Hijau", value: "6.0% – 8.0% (Pucuk Utuh)", status: "warn" },
-      { label: "Sampah/Tanah", value: "2.0% – 3.0% (Tanah Melekat)", status: "warn" },
-    ]
-  },
-  {
-    code: "T", label: "MBS T", name: "Belum ditetapkan",
-    tol: "Belum ditetapkan", rafaksi: "Belum ditetapkan", status: "Hasil Deteksi T",
-    statusCls: "t", badgeCls: "badge-t", img: "/grades/mbs-t.png",
-    color: "#9333ea", grad: "linear-gradient(90deg, #9333ea, #c084fc)",
-    kriteria: "Kelas T sesuai hasil model dan database. Aturan toleransi dan rafaksi belum ditetapkan.",
-    decision: "Belum ditetapkan", tier: "rafaksi",
-    variasi: [{ label: "Kelas Model", value: "T", status: "warn" },
-      { label: "Toleransi", value: "Belum ditetapkan", status: "warn" },
-      { label: "Rafaksi", value: "Belum ditetapkan", status: "warn" }]
-  },
-  {
-    code: "G",
-    label: "MBS G",
-    name: "Ditolak Giling",
-    tol: "> 20%",
-    rafaksi: "Reject Giling",
-    status: "Ditolak Meja",
-    statusCls: "g",
-    badgeCls: "badge-g",
-    img: "/grades/mbs-g.jpg",
-    color: "#dc2626",
-    grad: "linear-gradient(90deg, #dc2626, #f87171)",
-    kriteria: "Kotoran melebihi batas penerimaan pabrik. Ditolak di meja tebu / wajib sortir ulang.",
-    decision: "✕ Ditolak Giling (Reject Meja)",
-    tier: "tolak",
-    variasi: [
-      { label: "Daduk Kering", value: "> 10.0% (Kotoran Masif)", status: "danger" },
-      { label: "Pucuk Hijau", value: "> 8.0% (Belum Dipotong)", status: "danger" },
-      { label: "Sampah/Tanah", value: "> 3.0% (Bongkahan Tanah)", status: "danger" },
-    ]
-  },
-  {
-    code: "X",
-    label: "MBS X",
-    name: "Afkir Mutlak",
-    tol: "Masif / Bahaya",
-    rafaksi: "Tolak Mutlak",
-    status: "Afkir Total",
-    statusCls: "x",
-    badgeCls: "badge-x",
-    img: "/grades/mbs-x.jpg",
-    color: "#991b1b",
-    grad: "linear-gradient(90deg, #7f1d1d, #ef4444)",
-    kriteria: "Tercampur batu, kayu, tanah gumpal, atau tebu busuk. Ditolak mutlak karena bahaya gilingan.",
-    decision: "✕ Ditolak Mutlak (Afkir / Tolak DO)",
-    tier: "tolak",
-    variasi: [
-      { label: "Daduk Kering", value: "Campuran Masif / Busuk", status: "danger" },
-      { label: "Pucuk Hijau", value: "Tebu Rusak / Mati Total", status: "danger" },
-      { label: "Sampah Asing", value: "Batu/Kayu/Besi (Bahaya Roll)", status: "danger" },
-    ]
-  },
-];
-
-export function normalizeGrade(rawGrade?: string | null): TrangkilGradeCode {
-  if (!rawGrade) return "M";
-  const g = rawGrade.toUpperCase().trim().replace(/^MBS\s*/, "").trim();
-  if (g === "S") return "S";
-  if (g === "M") return "M";
-  if (g === "A") return "A";
-  if (g === "D") return "D";
-  if (g === "B") return "B";
-  if (g === "T") return "T";
-  if (g === "G" || g === "REJECT" || g === "REJECT_G") return "G";
-  if (g === "X" || g === "REJECT_X") return "X";
-  if (g === "C") return "D";
-  if (g === "A/M") return "A";
-  return "M";
-}
+export { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "../utils/grade-guide";
+import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
@@ -343,6 +144,16 @@ export function DashboardPage() {
   const [activeFactory, setActiveFactory] = useState<FactoryKey>(initialFactory);
   const [activeLine, setActiveLine] = useState<number>(() => getDefaultLine(initialFactory));
   const [capturePage, setCapturePage] = useState(1);
+  const [dashboardPane, setDashboardPane] = useState("camera");
+  const [eventPage, setEventPage] = useState(1);
+  const [eventPageSize, setEventPageSize] = useState(4);
+  const eventListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!eventListRef.current) return;
+    const observer = new ResizeObserver(([entry]) => setEventPageSize(Math.max(1, Math.floor(entry.contentRect.height / 39))));
+    observer.observe(eventListRef.current);
+    return () => observer.disconnect();
+  }, []);
   const [timelinePage, setTimelinePage] = useState(1);
   const [selectedCapture, setSelectedCapture] = useState<InferenceResult | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -353,6 +164,7 @@ export function DashboardPage() {
 
   // Cycle / Scanning State
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
+  useEffect(() => setEventPage(1), [selectedCycleId, activeLine]);
   const [cyclePickerOpen, setCyclePickerOpen] = useState(false);
   const cyclePickerRef = useRef<HTMLDivElement>(null);
   const [cycleElapsedSeconds, setCycleElapsedSeconds] = useState(0);
@@ -644,6 +456,9 @@ export function DashboardPage() {
       t <= (selectedCycle.completedAt ? new Date(selectedCycle.completedAt).getTime() + 1000 : Date.now());
   }) : analysisFrames;
   const displayedEvents = displayedCaptures;
+  const eventPages = Math.max(1, Math.ceil(displayedEvents.length / eventPageSize));
+  const safeEventPage = Math.min(eventPage, eventPages);
+  const visibleEvents = displayedEvents.slice((safeEventPage - 1) * eventPageSize, safeEventPage * eventPageSize);
 
   const activeCycleFrames = useMemo(() => {
     if (!activeCycle) return [];
@@ -654,7 +469,32 @@ export function DashboardPage() {
     });
   }, [activeCycle, analysisFrames]);
 
-  const pageSize = 15;
+  const [captureDetailPanel, setCaptureDetailPanel] = useState("image");
+  useEffect(() => { setCaptureDetailPanel("image"); }, [selectedCapture?.id]);
+  const [analysisDetailTab, setAnalysisDetailTab] = useState("grades");
+  const panelSize = usePanelSize<HTMLElement>();
+  const compactLayout = panelSize.width < 1200 || panelSize.height < 600;
+  const captureColumns = compactLayout && panelSize.width < 500 ? 2 : 3;
+  const captureRows = panelSize.height < 600 ? 2 : 4;
+  const captureGridRef = useRef<HTMLDivElement>(null);
+  const [captureAspect, setCaptureAspect] = useState(2);
+  const [captureCardWidth, setCaptureCardWidth] = useState(200);
+  useEffect(() => {
+    const grid = captureGridRef.current;
+    if (!grid) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (!width || !height) return;
+      const columnWidth = (width - (captureColumns - 1) * 10) / captureColumns;
+      const rowHeight = (height - (captureRows - 1) * 10) / captureRows;
+      // Reserve the card border, padding and timestamp below the original image.
+      const imageHeight = Math.max(1, rowHeight - 32);
+      setCaptureCardWidth(Math.max(1, Math.min(columnWidth, imageHeight * captureAspect + 12)));
+    });
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [captureAspect, captureColumns, captureRows]);
+  const pageSize = captureColumns * captureRows;
   const totalPages = Math.max(1, Math.ceil(displayedCaptures.length / pageSize));
   const currentPage = Math.min(capturePage, totalPages);
   const visibleCaptures = displayedCaptures.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -977,7 +817,7 @@ export function DashboardPage() {
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
-    <section className="dashboardPage newLayout">
+    <section ref={panelSize.ref} className="dashboardPage newLayout" data-compact={compactLayout} data-short={panelSize.height < 600} data-pane={dashboardPane} data-analysis-view={analysisDetailTab}>
       {/* ─── Top Station Header ─── */}
       <div className="stationHeader">
         <div className="stationHeaderLeft">
@@ -1023,6 +863,9 @@ export function DashboardPage() {
             </div>
           )}
 
+          <select className="responsiveMbsSelect" aria-label="Pilih meja tebu" value={activeLine} onChange={event => setActiveLine(Number(event.target.value))}>
+            {currentFactory.lines.map(item => <option key={item.line} value={item.line} disabled={Boolean(item.locked)}>{item.title}</option>)}
+          </select>
           {/* MBS Tab Pills */}
           <div className="stationMbsTabs">
             {currentFactory.lines.map((item) => {
@@ -1118,6 +961,11 @@ export function DashboardPage() {
       </div>
 
       {/* ─── Main 3-Panel Layout ─── */}
+      <nav className="dashboardPaneTabs" aria-label="Panel dashboard">
+        {[['camera', 'Kamera & Kontrol'], ['captures', 'Tangkapan Frame'], ['analysis', 'Analisis Mutu'], ['events', 'Log Frame']].map(([id, label]) => (
+          <button key={id} aria-pressed={dashboardPane === id} className={dashboardPane === id ? 'active' : ''} onClick={() => setDashboardPane(id)}>{label}</button>
+        ))}
+      </nav>
       <div className="stationMainGrid">
 
         {/* ══════ LEFT PANEL: Live Stream + Event Log ══════ */}
@@ -1491,8 +1339,8 @@ export function DashboardPage() {
               </div>
             )}
 
-            <div className="eventFeedList">
-              {displayedEvents.map((item) => {
+            <div className="eventFeedList" ref={eventListRef}>
+              {visibleEvents.map((item) => {
                 const itemImpurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                 const normG = normalizeGrade(item.grade);
                 const gradeColor = (normG === "S" || normG === "M" || normG === "A") ? "eventGradeBlueBright" :
@@ -1542,6 +1390,11 @@ export function DashboardPage() {
                 </div>
               )}
             </div>
+            {displayedEvents.length > 0 && <div className="eventFeedPagination">
+              <button disabled={safeEventPage === 1} onClick={() => setEventPage(safeEventPage - 1)} aria-label="Frame sebelumnya">&lsaquo;</button>
+              <span>{safeEventPage} / {eventPages}</span>
+              <button disabled={safeEventPage === eventPages} onClick={() => setEventPage(safeEventPage + 1)} aria-label="Frame berikutnya">&rsaquo;</button>
+            </div>}
           </div>
         </div>
 
@@ -1732,7 +1585,8 @@ export function DashboardPage() {
               {/* Right: Meta & Pagination */}
               <div className="captureGridMeta">
                 <span className="captureGridCount">
-                  {visibleCapturesCount === 0 ? "No captures" : `${visibleCapturesCount} total • Page ${currentPage}/${totalPages}`}
+                  <span className="captureGridTotal">{visibleCapturesCount} frame · </span>
+                  <span>{currentPage}/{totalPages}</span>
                 </span>
                 <div className="captureGridPageBtns">
                   <button
@@ -1796,7 +1650,7 @@ export function DashboardPage() {
               </div>
             )}
 
-            <div className="capturePhotoGrid">
+            <div className="capturePhotoGrid" ref={captureGridRef} style={{ gridTemplateColumns: `repeat(${captureColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${captureRows}, minmax(0, 1fr))` }}>
               {visibleCaptures.map((item) => {
                 const itemImpurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                 const normG = normalizeGrade(item.grade);
@@ -1808,6 +1662,7 @@ export function DashboardPage() {
                     key={item.id}
                     type="button"
                     className="capturePhotoCard"
+                    style={{ width: `min(100%, ${captureCardWidth}px)` }}
                     onClick={() => setSelectedCapture(item)}
                     title={`Frame ${frameNumber(item.id)} — MBS ${item.grade}`}
                   >
@@ -1817,6 +1672,10 @@ export function DashboardPage() {
                           src={item.snapshot.startsWith("http") ? item.snapshot : `${backendUrl}${item.snapshot}`}
                           alt={`Detection frame ${frameNumber(item.id)}`}
                           className="photoThumbImg"
+                          onLoad={event => {
+                            const image = event.currentTarget;
+                            if (image.naturalWidth && image.naturalHeight) setCaptureAspect(image.naturalWidth / image.naturalHeight);
+                          }}
                         />
                       ) : (
                         <div className="photoThumbEmpty">
@@ -1888,8 +1747,8 @@ export function DashboardPage() {
               })}
 
               {placeholders.map((_, index) => (
-                <div key={`ph-${index}`} className="capturePhotoCardPlaceholder">
-                  <div className="photoThumbEmpty">
+                <div key={`ph-${index}`} className="capturePhotoCardPlaceholder" style={{ width: `min(100%, ${captureCardWidth}px)` }}>
+                  <div className="photoThumbEmpty" style={{ aspectRatio: captureAspect }}>
                     <Camera size={22} className="placeholderCamIcon" />
                   </div>
                   <div className="photoCardFooter muted">
@@ -1900,70 +1759,7 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {/* Combined Standar Toleransi Mutu & Panduan Kelas Label dengan Contoh Gambar */}
-          <div className="combinedQualityGuideCard">
-            <div className="combinedGuideHeader">
-              <div className="combinedGuideTitleGroup">
-                <div className="combinedGuideTitle">
-                  <Layers size={11} />
-                  <span>STANDAR TOLERANSI MUTU & PANDUAN KELAS LABEL AI</span>
-                </div>
-                <span className="combinedGuideSub">
-                  Ambang batas toleransi mutu pabrik gula beserta visualisasi contoh material tiap grade MBS
-                </span>
-              </div>
 
-            </div>
-
-            {/* 7 Grade Cards with Example Pictures (PT Trangkil) - Fixed 2 Rows (4 + 3) */}
-            <div className="mbsGradesGrid mode-2rows">
-              {TRANGKIL_GRADES.map((item, idx) => {
-                const isActive = hasLatestInference && normalizeGrade(grade) === item.code;
-                return (
-                  <div key={item.code} className={`mbsGradeCard landscape ${isActive ? "activeMatch" : ""}`}>
-                    <div className="mbsGradeThumbWrap landscape">
-                      <img src={item.img} alt={`Contoh Visual ${item.label} (${item.name})`} className="mbsGradeImg" />
-                      <span className={`mbsGradeBadge ${item.badgeCls}`}>{item.label}</span>
-                      <span className="mbsImpLimitBadge">Tol: {item.tol}</span>
-                      {isActive && (
-                        <span className="mbsLiveMatchPill">LIVE MATCH</span>
-                      )}
-                      <span className="mbsLandscapePhotoTag">
-                        <Camera size={8} />
-                        <span>16:9 Meja Tebu</span>
-                      </span>
-                    </div>
-                    <div className="mbsGradeCardBody">
-                      <div className="mbsGradeCardHead">
-                        <strong>{idx + 1}. {item.label}</strong>
-                        <span className={`mbsGradeStatus ${item.statusCls}`}>{item.status}</span>
-                      </div>
-                      <span className="mbsGradeSubName">{item.name}</span>
-                      <div className="mbsGradeRafaksiBanner" style={{ background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}35` }}>
-                        <span>Rafaksi:</span>
-                        <strong>{item.rafaksi}</strong>
-                      </div>
-
-                      {/* 3 Baris Variasi Kriteria Material Contoh */}
-                      <div className="mbsGradeVariasiList">
-                        {item.variasi.map((v, vIdx) => (
-                          <div key={vIdx} className={`mbsVariasiRow ${v.status}`}>
-                            <span className="mbsVariasiDot" />
-                            <span className="mbsVariasiLabel">{v.label}</span>
-                            <span className="mbsVariasiVal">{v.value}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="mbsGradeDecisionBadge" title={item.decision}>
-                        {item.decision}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
         {/* ══════ RIGHT PANEL: Analisis Kategori (Lengkap) ══════ */}
@@ -1979,8 +1775,8 @@ export function DashboardPage() {
               <div className="catModeSwitchPills">
                 <button
                   type="button"
-                  className={`catModePillBtn ${analysisTab === "realtime" ? "active" : ""}`}
-                  onClick={() => setAnalysisTab("realtime")}
+                  className={`catModePillBtn ${analysisTab === "realtime" && analysisDetailTab === "grades" ? "active" : ""}`}
+                  onClick={() => { setAnalysisTab("realtime"); setAnalysisDetailTab("grades"); }}
                   title="Lihat kalkulasi realtime siklus saat ini"
                 >
                   <Activity size={10} />
@@ -1988,13 +1784,15 @@ export function DashboardPage() {
                 </button>
                 <button
                   type="button"
-                  className={`catModePillBtn ${analysisTab === "daily" ? "active" : ""}`}
-                  onClick={() => setAnalysisTab("daily")}
+                  className={`catModePillBtn ${analysisTab === "daily" && analysisDetailTab === "grades" ? "active" : ""}`}
+                  onClick={() => { setAnalysisTab("daily"); setAnalysisDetailTab("grades"); }}
                   title="Lihat rekapitulasi chart seluruh siklus harian"
                 >
                   <TrendingUp size={10} />
                   <span>Rekap Siklus ({dailyCyclesStats?.totalCycles || 0})</span>
                 </button>
+                <button type="button" className={`catModePillBtn responsiveAnalysisTab ${analysisDetailTab === "consistency" ? "active" : ""}`} onClick={() => { setAnalysisTab("realtime"); setAnalysisDetailTab("consistency"); }} aria-pressed={analysisDetailTab === "consistency"}>Konsistensi</button>
+                <button type="button" className={`catModePillBtn responsiveAnalysisTab ${analysisDetailTab === "timeline" ? "active" : ""}`} onClick={() => { setAnalysisTab("daily"); setAnalysisDetailTab("timeline"); }} aria-pressed={analysisDetailTab === "timeline"}>Tren Siklus</button>
               </div>
             </div>
 
@@ -2270,6 +2068,7 @@ export function DashboardPage() {
                         onClick={() => {
                           setSelectedCycleId(item.id);
                           setAnalysisTab("realtime");
+                          setAnalysisDetailTab("grades");
                         }}
                         title={`Klik untuk menelaah foto tangkapan ${item.code}`}
                       >
@@ -2317,7 +2116,7 @@ export function DashboardPage() {
             aria-modal="true"
             aria-labelledby="modal-title"
           >
-            <div className="capture-detail-modal capture-frame-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="capture-detail-modal capture-frame-popup" data-panel={captureDetailPanel} onClick={(e) => e.stopPropagation()}>
               {/* Header */}
               <div className="capture-detail-modal__header">
                 <div className="modal-title-with-badge">
@@ -2341,6 +2140,11 @@ export function DashboardPage() {
               </div>
 
               {/* Body */}
+              <nav className="responsiveDetailTabs" aria-label="Tampilan detail frame">
+                <button aria-pressed={captureDetailPanel === "image"} onClick={() => setCaptureDetailPanel("image")}>Gambar</button>
+                <button aria-pressed={captureDetailPanel === "decision"} onClick={() => setCaptureDetailPanel("decision")}>Informasi & Keputusan</button>
+                <button aria-pressed={captureDetailPanel === "analysis"} onClick={() => setCaptureDetailPanel("analysis")}>Analisis Mutu</button>
+              </nav>
               <div className="capture-frame-popup__body">
                 {/* Left Column: Image + Metadata Chips + Factory Decision */}
                 <div className="capture-frame-popup__left">

@@ -63,6 +63,7 @@ function legacySessions(): TruckInspectionSession[] {
 function saveLegacy(sessions: TruckInspectionSession[]) { localStorage.setItem("tebu-truck-sessions", JSON.stringify(sessions)); }
 
 let refreshVersion = 0;
+let appliedRefreshVersion = 0;
 
 export const useAppStore = create<AppState>((set, get) => ({
   session: readSession(), latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [],
@@ -94,33 +95,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     const current = get().session;
     if (!current) return;
     const version = ++refreshVersion;
-    const previous = get();
-    const failed = <T,>(error: unknown, fallback: T): T => {
+    const failed = (error: unknown) => {
       if (error instanceof ApiError && error.status === 401 && get().session?.token === current.token) get().logout();
-      return fallback;
+      return undefined;
     };
     const permissions = current.user.permissions;
     const can = (permission: string) => permissions.includes(permission);
     const [latest, history, cameras, models, status, backendTrucks, deletionRequests] = await Promise.all([
-      can("dashboard.read") ? api<InferenceResult | null>("/api/inference/latest").catch(error => failed(error, previous.latest)) : Promise.resolve(null),
-      can("history.read") ? api<InferenceResult[]>("/api/inference/history").catch(error => failed(error, previous.history)) : Promise.resolve([]),
-      can("camera.read") ? api<CameraRow[]>("/api/cameras").catch(error => failed(error, previous.cameras)) : Promise.resolve([]),
-      can("model.read") ? api<AiModel[]>("/api/models").catch(error => failed(error, previous.models)) : Promise.resolve([]),
-      can("dashboard.read") ? api<SystemStatus>("/api/system/status").catch(error => failed(error, previous.status)) : Promise.resolve(null),
-      can("history.read") ? api<TruckInspectionSession[]>("/api/truck-inspections").catch(error => failed(error, previous.truckSessions.filter(item => !item.id.startsWith("session_")))) : Promise.resolve([]),
-      can("dashboard.read") ? api<DeletionRequest[]>("/api/deletion-requests").catch(error => failed(error, previous.deletionRequests)) : Promise.resolve([])
+      can("dashboard.read") ? api<InferenceResult | null>("/api/inference/latest").catch(failed) : Promise.resolve(null),
+      can("history.read") ? api<InferenceResult[]>("/api/inference/history").catch(failed) : Promise.resolve([]),
+      can("camera.read") ? api<CameraRow[]>("/api/cameras").catch(failed) : Promise.resolve([]),
+      can("model.read") ? api<AiModel[]>("/api/models").catch(failed) : Promise.resolve([]),
+      can("dashboard.read") ? api<SystemStatus>("/api/system/status").catch(failed) : Promise.resolve(null),
+      can("history.read") ? api<TruckInspectionSession[]>("/api/truck-inspections").catch(failed) : Promise.resolve([]),
+      can("dashboard.read") ? api<DeletionRequest[]>("/api/deletion-requests").catch(failed) : Promise.resolve([])
     ]);
-    if (get().session?.token !== current.token || version !== refreshVersion) return;
-    const trucks = [...(backendTrucks ?? []), ...legacySessions()];
+    // A response may finish after the next poll starts. Apply completed responses
+    // in order, rather than discarding every response on a slower connection.
+    if (get().session?.token !== current.token || version < appliedRefreshVersion) return;
+    appliedRefreshVersion = version;
+    const trucks = [...(backendTrucks ?? get().truckSessions.filter(item => !item.id.startsWith("session_"))), ...legacySessions()];
     set({
-      latest,
-      history: history ?? [],
-      cameras: cameras ?? [],
-      models: models ?? [],
-      status,
+      latest: latest === undefined ? get().latest : latest,
+      history: history ?? get().history,
+      cameras: cameras ?? get().cameras,
+      models: models ?? get().models,
+      status: status === undefined ? get().status : status,
       truckSessions: trucks,
       activeTruckSession: trucks.find(item => item.status === "active") ?? null,
-      deletionRequests: deletionRequests ?? []
+      deletionRequests: deletionRequests ?? get().deletionRequests
     });
   },
   createCamera: async camera => { await api<CameraRow>("/api/cameras", { method: "POST", body: JSON.stringify(camera) }); await get().refresh(); },

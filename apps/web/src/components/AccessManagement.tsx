@@ -294,7 +294,7 @@ export function AccessManagement() {
               <tbody>
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="accessEmptyCell">
+                    <td data-label="Pengguna" colSpan={5} className="accessEmptyCell">
                       {loading ? "Memuat data pengguna resmi pabrik..." : "Belum ada pengguna yang dapat ditampilkan."}
                     </td>
                   </tr>
@@ -306,7 +306,7 @@ export function AccessManagement() {
                     return (
                       <tr key={u.id} className={isCurrentSessionUser ? "rowCurrentActive" : ""}>
                         {/* Column 1: Pengguna & Pabrik */}
-                        <td>
+                        <td data-label="Pengguna">
                           <div className="userMetaCell">
                             <div className={`userAvatarPill ${meta.badgeType}`}>
                               {meta.badgeType === "admin" ? <Crown size={18} /> : meta.badgeType === "operator" ? <Activity size={18} /> : <Shield size={18} />}
@@ -323,7 +323,7 @@ export function AccessManagement() {
                         </td>
 
                         {/* Column 2: Peran */}
-                        <td>
+                        <td data-label="Role">
                           {meta.badgeType === "admin" ? (
                             <div className="roleTagBox admin">
                               <Crown size={13} />
@@ -343,7 +343,7 @@ export function AccessManagement() {
                         </td>
 
                         {/* Column 3: Batasan Akses */}
-                        <td>
+                        <td data-label="Hak akses">
                           <div className="policyGuardrails">
                             {meta.badgeType === "admin" ? (
                               <>
@@ -377,14 +377,14 @@ export function AccessManagement() {
                         </td>
 
                         {/* Column 4: Status */}
-                        <td>
+                        <td data-label="Status">
                           <span className={`accessBadge ${u.active ? "good" : "muted"}`}>
                             {u.active ? "AKTIF" : "NONAKTIF"}
                           </span>
                         </td>
 
                         {/* Column 5: Aksi */}
-                        <td>
+                        <td data-label="Aksi">
                           <div className="accessActions">
                             {canWriteUsers && (
                               <>

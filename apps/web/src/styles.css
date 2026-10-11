@@ -16173,3 +16173,657 @@ main.dashboardMainFixed {
   color: #ffffff;
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
+
+/* Dedicated guide: fixed viewport, paginated cards on smaller screens. */
+.qualityGuidePage { height:100dvh; min-height:0; overflow:hidden; padding:0 !important; display:flex; flex-direction:column; background:var(--color-bg); box-sizing:border-box; }
+.qualityGuideContent { flex:1; min-height:0; display:flex; flex-direction:column; gap:12px; padding:14px 16px; overflow:hidden; box-sizing:border-box; }
+.qualityGuideHeader { display:flex; align-items:center; gap:14px; flex-shrink:0; padding:16px 20px; margin:0; background:var(--color-surface); border-bottom:1px solid var(--color-border); box-sizing:border-box; }
+.qualityGuideEyebrow { font-size:10px; font-weight:800; letter-spacing:1.5px; color:var(--color-primary); }
+.qualityGuideHeader h1 { margin:4px 0; font-size:clamp(15px,1.55vw,24px); line-height:1.25; color:var(--color-text); }
+.qualityGuideHeader p { margin:0; font-size:12px; color:var(--color-muted); }
+.qualityGuideClassCount { margin-left:auto; white-space:nowrap; padding:8px 12px; border:1px solid var(--color-border); border-radius:20px; font-size:12px; color:var(--color-muted); }
+.qualityGuideGrid { flex:1; min-height:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); gap:14px; }
+.qualityGuidePage[data-count="4"] .qualityGuideGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.qualityGuidePage[data-count="2"] .qualityGuideGrid { grid-template-columns:minmax(0,1fr); }
+.qualityGuideCard { display:flex; flex-direction:column; min-height:0; min-width:0; border:1px solid var(--color-border); border-top:3px solid; border-radius:14px; overflow:hidden; background:var(--color-surface); box-shadow:0 3px 12px rgba(15,23,42,.04); }
+.qualityGuidePhoto { position:relative; flex:1 1 32%; min-height:55px; overflow:hidden; background:#0f172a; }
+.qualityGuidePhoto img { display:block; width:100%; height:100%; object-fit:cover; }
+.qualityGuidePhoto .mbsGradeBadge { top:10px; left:10px; font-size:12px; padding:4px 9px; border-radius:6px; }
+.qualityGuidePhotoCaption { position:absolute; bottom:8px; left:10px; background:rgba(15,23,42,.7); color:#fff; padding:3px 6px; border-radius:4px; font-size:9px; }
+.qualityGuideBody { display:flex; flex-direction:column; gap:8px; padding:12px; flex:0 0 auto; min-width:0; }
+.qualityGuideCardTitle { display:flex; align-items:center; justify-content:space-between; gap:4px; }
+.qualityGuideCardTitle h2 { margin:0; font-size:17px; color:var(--color-text); }
+.qualityGuideCardTitle > span { font-size:10px; font-weight:700; }
+.qualityGuideDescription { margin:0; font-size:11px; color:var(--color-muted); }
+.qualityGuideMetrics { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.qualityGuideMetrics > div { padding:7px; border-radius:7px; background:var(--color-surface-soft); border:1px solid var(--color-border); display:flex; flex-direction:column; gap:3px; }
+.qualityGuideMetrics span { font-size:9px; color:var(--color-muted); }
+.qualityGuideMetrics strong { font-size:11px; color:var(--color-text); }
+.qualityGuideCriteria { margin:0; display:flex; flex-direction:column; gap:5px; font-size:10px; }
+.qualityGuideCriteria > div { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.qualityGuideCriteria dt { color:var(--color-muted); flex-shrink:0; }
+.qualityGuideCriteria dd { margin:0; text-align:right; color:var(--color-text); font-weight:600; }
+.qualityGuideDecision { display:flex; align-items:center; gap:5px; padding:7px; border-radius:7px; font-size:10px; font-weight:700; }
+.qualityGuideDecision svg { flex-shrink:0; }
+.qualityGuideFooter { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-shrink:0; color:var(--color-muted); font-size:11px; }
+.qualityGuidePagination { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+.qualityGuidePagination button,.eventFeedPagination button { display:grid; place-items:center; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-primary); border-radius:6px; width:28px; height:26px; cursor:pointer; }
+.qualityGuidePagination button:disabled,.eventFeedPagination button:disabled { opacity:.35; cursor:default; }
+/* Dashboard: larger capture gallery, calmer spacing, no scrolling lists. */
+.dashboardPage.newLayout .stationMainGrid { grid-template-columns:clamp(290px,24vw,350px) minmax(0,1fr) clamp(285px,23vw,330px); gap:10px; padding:10px; box-sizing:border-box; }
+.dashboardPage.newLayout .stationLeftPanel,.dashboardPage.newLayout .stationCenterPanel,.dashboardPage.newLayout .stationRightPanel { border:1px solid var(--color-border); border-radius:12px; min-height:0; min-width:0; overflow:hidden; max-width:none; }
+.dashboardPage.newLayout .capturePhotoGrid { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); gap:10px; padding:10px; }
+.dashboardPage.newLayout .capturePhotoCard,.dashboardPage.newLayout .capturePhotoCardPlaceholder { border-radius:9px; }
+.dashboardPage.newLayout .eventFeedList { overflow:hidden; }
+.dashboardPage.newLayout .eventFeedRow { min-height:39px; flex:0 0 39px; box-sizing:border-box; }
+.eventFeedPagination { display:flex; justify-content:center; align-items:center; gap:12px; padding:4px; font-size:10px; color:var(--color-muted); flex-shrink:0; border-top:1px solid var(--color-border); }
+.dashboardPage.newLayout .categoryAnalysisCard,.dashboardPage.newLayout .dailyAggregateScrollArea { overflow:hidden !important; }
+.dashboardPage.newLayout .catProbDesc { display:none; }
+.dashboardPaneTabs { display:none; }
+@media (max-height:780px) {
+ .qualityGuidePage { padding:14px; gap:10px; }
+ .qualityGuideBody { padding:9px; gap:5px; }
+ .qualityGuideCriteria { font-size:9px; gap:3px; }
+ .qualityGuideMetrics > div { padding:5px; }
+ .qualityGuideCardTitle h2 { font-size:15px; }
+ .dashboardPage.newLayout .catGradeProbRow { min-height:25px; padding:3px 6px; }
+ .dashboardPage.newLayout .catGradeProbList { gap:3px; }
+ .dashboardPage.newLayout .catHeroGrade { padding:5px; }
+ .dashboardPage.newLayout .categoryAnalysisCard { gap:3px; }
+ .dashboardPage.newLayout .stationMainGrid { gap:6px; padding:6px; }
+}
+@media (max-width:1100px) {
+ .dashboardPaneTabs { display:flex; flex-shrink:0; gap:6px; padding:6px 10px; background:var(--color-surface); border-bottom:1px solid var(--color-border); }
+ .dashboardPaneTabs button { flex:1; padding:7px; border:1px solid var(--color-border); border-radius:7px; color:var(--color-muted); background:var(--color-surface-soft); font-size:11px; cursor:pointer; }
+ .dashboardPaneTabs button.active { color:#fff; background:#2563eb; border-color:#2563eb; }
+ .dashboardPage.newLayout .stationMainGrid { grid-template-columns:minmax(0,1fr); height:auto !important; max-height:none !important; }
+ .dashboardPage.newLayout .stationLeftPanel,.dashboardPage.newLayout .stationCenterPanel,.dashboardPage.newLayout .stationRightPanel { display:none; overflow:hidden; }
+ .dashboardPage[data-pane="camera"] .stationLeftPanel,.dashboardPage[data-pane="captures"] .stationCenterPanel,.dashboardPage[data-pane="analysis"] .stationRightPanel { display:flex; }
+ .dashboardPage.newLayout .capturePhotoGrid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+ .dashboardPage.newLayout .categoryAnalysisCard { padding:12px; }
+ .dashboardPage.newLayout .stationHeaderRight { gap:4px; }
+ .qualityGuideClassCount { display:none; }
+}
+@media (max-width:650px) {
+ .qualityGuidePage { padding:10px; gap:8px; }
+ .qualityGuideHeader { padding:12px; }
+ .qualityGuideHeader p { font-size:10px; }
+ .qualityGuideFooter > span { font-size:9px; max-width:65%; }
+ .qualityGuideBody { gap:5px; padding:8px; }
+ .dashboardPage.newLayout .capturePhotoGrid { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); }
+}
+
+@media (min-width:1200px) and (max-height:719px) {
+ .qualityGuidePage[data-count="4"] .qualityGuideGrid { grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
+}
+
+.dashboardPage.newLayout .captureGridHeader { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:10px; flex-shrink:0; }
+.dashboardPage.newLayout .captureGridTitle { grid-column:1; grid-row:1; min-width:0; }
+.dashboardPage.newLayout .captureGridMeta { grid-column:2; grid-row:1; min-width:0; flex-shrink:0; }
+.dashboardPage.newLayout .captureCycleControlGroup { grid-column:1 / -1; grid-row:2; justify-content:flex-start; width:100%; min-width:0; }
+.dashboardPage.newLayout .cyclePickerWrapper { max-width:100%; }
+
+/* Proportional captures and a single compact gallery toolbar. */
+.dashboardPage.newLayout .captureGridCard { container-type:inline-size; }
+.dashboardPage.newLayout .captureGridHeader { grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:8px; padding:10px; }
+.dashboardPage.newLayout .captureCycleControlGroup { grid-column:2; grid-row:1; justify-content:center; width:auto; }
+.dashboardPage.newLayout .captureGridMeta { grid-column:3; gap:5px; }
+.dashboardPage.newLayout .cyclePickerWrapper { min-width:0; width:100%; max-width:290px; }
+.dashboardPage.newLayout .cyclePickerTrigger { width:100%; min-width:0; padding:6px 8px; gap:6px; }
+.dashboardPage.newLayout .cyclePickerTriggerText { min-width:0; overflow:hidden; }
+.dashboardPage.newLayout .cyclePickerTriggerText strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.dashboardPage.newLayout .cyclePickerSubtext { display:none; }
+.dashboardPage.newLayout .cyclePickerSelectedRow { min-width:0; }
+.dashboardPage.newLayout .cyclePickerResetBtn { padding:5px; }
+.dashboardPage.newLayout .cyclePickerResetBtn span { display:none; }
+.dashboardPage.newLayout .cyclePickerGradePill { display:none; }
+.dashboardPage.newLayout .captureGridCount { font-size:10px; }
+.dashboardPage.newLayout .captureGridTitleBadge { padding:6px 8px; font-size:11px; white-space:nowrap; }
+.dashboardPage.newLayout .capturePhotoGrid { grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(4,minmax(0,1fr)); justify-items:center; align-items:start; overflow:hidden; }
+.dashboardPage.newLayout .capturePhotoCard,.dashboardPage.newLayout .capturePhotoCardPlaceholder { height:auto; min-height:0; padding:5px; align-self:start; }
+.dashboardPage.newLayout .photoThumb { flex:none; height:auto; aspect-ratio:auto; width:100%; border-radius:5px; background:transparent; }
+.dashboardPage.newLayout .photoThumbImg { height:auto; width:100%; object-fit:contain; }
+.dashboardPage.newLayout .capturePhotoCardPlaceholder > .photoThumbEmpty { flex:none; height:auto; aspect-ratio:16 / 9; border-radius:5px; }
+.dashboardPage.newLayout .photoCardFooter { flex:none; min-height:20px; box-sizing:border-box; }
+@container (max-width:560px) {
+ .dashboardPage.newLayout .captureGridTotal { display:none; }
+ .dashboardPage.newLayout .cyclePickerBadgeCount { font-size:9px; padding:2px 4px; }
+ .dashboardPage.newLayout .captureGridHeader { gap:5px; padding:8px; }
+ .dashboardPage.newLayout .captureGridTitleBadge { font-size:10px; padding:6px; }
+}
+
+/* History fills the viewport; every record remains accessible by pagination. */
+.historyPageContainer { height:100dvh; min-height:0; padding:0 !important; overflow:hidden; box-sizing:border-box; }
+.historyPageContainer .stationHeader { flex-shrink:0; }
+.historyPageContainer .historyContentBody { flex:1; min-height:0; max-width:none; padding:12px 16px 0; gap:10px; overflow:hidden; box-sizing:border-box; }
+.historyPageContainer .historyModeTabsRow { flex-wrap:nowrap; flex-shrink:0; gap:8px; }
+.historyPageContainer .historyKpiGrid { flex-shrink:0; gap:10px; }
+.historyPageContainer .historyKpiCard { padding:9px 12px; min-height:0; }
+.historyPageContainer .historyKpiValue { font-size:23px; line-height:1.1; }
+.historyPageContainer .historyCockpitFilterCard { flex-shrink:0; padding:9px 12px; gap:7px; }
+.historyPageContainer .filterCardHeader { padding-bottom:6px; }
+.historyPageContainer .cockpitFilterGrid { gap:8px; }
+.historyPageContainer .cockpitField { padding:6px 8px; min-width:0; }
+.historyPageContainer .cockpitInput,.historyPageContainer .cockpitSelect { height:34px; min-height:0; padding:5px 9px; font-size:12px; }
+.historyPageContainer .historyCockpitTableCard { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; }
+.historyPageContainer .historyTableCardHeader { flex-shrink:0; padding:8px 12px; }
+.historyPageContainer .historyTableWrap { flex:1; min-height:0; overflow:hidden; }
+.historyPageContainer .historyDataTable { width:100%; min-width:0 !important; table-layout:fixed; }
+.historyPageContainer .historyDataTable thead tr { height:38px; }
+.historyPageContainer .historyDataTable th { padding:5px 8px !important; font-size:10px !important; white-space:normal; overflow-wrap:anywhere; line-height:1.2; }
+.historyPageContainer .historyDataTable tbody tr { height:52px; }
+.historyPageContainer[data-view="trucks"] .historyDataTable td { padding:3px 8px !important; }
+.historyPageContainer[data-view="trucks"] .historyKpiCard { padding:7px 10px; }
+.historyPageContainer[data-view="trucks"] .historyKpiSub { margin-top:0; font-size:9px; }
+.historyPageContainer .historyDataTable td { padding:5px 8px !important; font-size:11px !important; white-space:normal; overflow-wrap:anywhere; line-height:1.2; }
+.historyPageContainer .historyDataTable th:first-child { width:14%; }
+.historyPageContainer .historyDataTable th:nth-child(8) { width:17%; }
+.historyPageContainer .historyDataTable th:last-child { width:12%; }
+.historyPageContainer .decision-badge { white-space:normal; font-size:9px; line-height:1.3; padding:4px 6px; max-width:100%; box-sizing:border-box; }
+.historyPageContainer .truckCodeCell { gap:5px; }
+.historyPageContainer .tableActionRow { gap:4px; justify-content:flex-end; }
+.historyPageContainer .historyDetailBtn { padding:4px 6px; gap:4px; font-size:10px; white-space:nowrap; }
+.historyPageContainer .stationSubText,.historyPageContainer .plateDriverSubText { font-size:9px; }
+.historyPageContainer .endTimeWrap { flex-wrap:wrap; gap:3px; }
+.historyPageContainer .thumbPreviewCell { height:36px; width:64px; }
+.historyPageContainer .thumbPreviewCell img { width:100%; height:100%; object-fit:contain; }
+.historyPagination { flex-shrink:0; display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 16px 12px; padding:9px 12px; background:var(--color-surface); border:1px solid var(--color-border); border-top:0; border-radius:0 0 10px 10px; color:var(--color-muted); font-size:11px; }
+.historyPagination > div { display:flex; align-items:center; gap:12px; }
+.historyPagination button { border:1px solid var(--color-border); border-radius:6px; background:var(--color-surface-soft); color:var(--color-primary); font-weight:600; font-size:11px; padding:6px 10px; cursor:pointer; }
+.historyPagination button:disabled { opacity:.4; cursor:default; }
+.historyPagination button:focus-visible,.gradePickerTrigger:focus-visible,.gradePickerMenu button:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
+@media (max-width:1250px) {
+ .historyPageContainer .historyContentBody { padding:10px 10px 0; }
+ .historyPageContainer .historyModeTabsRow button { font-size:10px; padding:7px 9px; }
+ .historyPageContainer .historyDataTable th,.historyPageContainer .historyDataTable td { padding:4px 5px !important; font-size:10px !important; }
+ .historyPageContainer .historyDetailBtn span { display:none; }
+ .historyPageContainer .historyDataTable th:last-child { width:7%; }
+ .historyPageContainer .historyDataTable th:first-child { width:15%; }
+ .historyPagination { margin:0 10px 10px; }
+}
+@media (max-height:720px) {
+ .historyPageContainer .historyKpiCard { padding:7px 10px; }
+ .historyPageContainer .historyKpiSub { display:none; }
+ /* Selected values and Reset Filter remain visible in the filter controls. */
+ .historyPageContainer[data-view="trucks"] .historyActiveFiltersRow { display:none; }
+ .historyPageContainer .historyCockpitFilterCard { padding:7px 10px; }
+ .historyPageContainer .cockpitField { padding:4px 6px; }
+}
+
+/* Ten frame rows, fixed modal, and a readable grade picker. */
+.capture-detail-modal.truck-detail-modal { height:calc(100dvh - 32px) !important; max-height:850px !important; }
+.truck-detail-modal .truck-detail-body { min-height:0; align-items:stretch !important; grid-template-columns:minmax(300px,38%) minmax(0,1fr) !important; grid-template-rows:minmax(0,1fr); overflow:hidden !important; }
+.truck-detail-modal .truck-left-column { min-height:0; }
+.truck-detail-modal .truck-right-column { min-height:0; }
+.truck-detail-modal .truck-cycles-table-wrapper { flex:1; min-height:0; }
+.truck-detail-modal .truck-table-scroll-area { flex:1; min-height:0; overflow:hidden; }
+.truck-detail-modal .truck-cycles-log-table { min-width:0; table-layout:fixed; height:100%; }
+.truck-detail-modal .truck-cycles-log-table th { width:auto !important; padding:6px 8px !important; font-size:10px !important; height:28px; box-sizing:border-box; }
+.truck-detail-modal .truck-cycles-log-table td { padding:3px 8px !important; font-size:11px !important; }
+.truck-detail-modal .truck-table-pagination { flex-shrink:0; min-height:32px; box-sizing:border-box; }
+.truck-detail-modal .truck-cycles-header-bar { flex-shrink:0; gap:8px; }
+.truck-detail-modal .cycle-detail-grade-filter { position:relative; padding:0; flex-shrink:0; background:none; border:0; }
+.truck-detail-modal .cycle-grade-select-wrap { position:relative; }
+.gradePickerTrigger { display:flex; align-items:center; gap:8px; padding:7px 9px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface-soft); color:var(--color-text); font-size:11px; font-weight:700; cursor:pointer; }
+.gradePickerTrigger[aria-expanded="true"] { border-color:var(--color-primary); box-shadow:0 0 0 3px rgba(37,99,235,.1); }
+.gradePickerCount { font-size:10px; padding:2px 6px; border-radius:5px; background:rgba(37,99,235,.08); color:var(--color-primary); white-space:nowrap; }
+.gradePickerMenu { position:absolute; top:calc(100% + 8px); right:0; width:285px; z-index:50; border:1px solid var(--color-border); border-radius:12px; padding:6px; background:var(--color-surface-solid); box-shadow:0 12px 35px rgba(15,23,42,.18); }
+.gradePickerMenuHeading { padding:5px 8px 7px; color:var(--color-muted); font-size:10px; font-weight:700; }
+.gradePickerMenu button { display:flex; align-items:center; width:100%; gap:9px; padding:7px 8px; text-align:left; border:0; border-radius:7px; background:transparent; color:var(--color-text); cursor:pointer; }
+.gradePickerMenu button:hover,.gradePickerMenu button[aria-selected="true"] { background:rgba(37,99,235,.08); }
+.gradePickerMenu button:disabled { opacity:.4; cursor:default; }
+.gradePickerDot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.gradePickerOptionText { display:flex; flex:1; flex-direction:column; gap:2px; }
+.gradePickerOptionText strong { font-size:11px; }
+.gradePickerOptionText small { font-size:10px; color:var(--color-muted); }
+@media (max-height:760px) {
+ .truck-detail-modal .truck-left-column { gap:6px; }
+ .truck-detail-modal .truck-detail-card { padding:7px 9px; }
+ .truck-detail-modal .truck-guide-row { padding:3px 5px; min-height:0; }
+ .truck-detail-modal .truck-guide-title { font-size:9px; }
+ .truck-detail-modal .truck-guide-kriteria { font-size:8px; }
+ .truck-detail-modal .truck-metadata-grid { gap:5px 8px; }
+ .truck-detail-modal .truck-meta-val { font-size:10px; }
+ .truck-detail-modal .truck-card-title-bar { margin-bottom:6px; }
+ .truck-detail-modal .truck-hero-grade-card { padding:7px 9px; gap:5px; }
+}
+@media (max-height:720px) {
+ .truck-detail-modal .truck-grades-compact-guide { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+ .truck-detail-modal .truck-guide-desc { flex-direction:column; align-items:flex-start; gap:1px; }
+ .truck-detail-modal .truck-guide-title,.truck-detail-modal .truck-guide-kriteria { white-space:normal; line-height:1.2; }
+ .truck-detail-modal .truck-guide-sub { font-size:8px; }
+ .truck-detail-modal .truck-guide-match-tag { display:none; }
+ .truck-detail-modal .truck-guide-row { align-items:flex-start; padding:4px; }
+ .truck-detail-modal .truck-card-title-bar { margin-bottom:3px; }
+}
+
+
+/* Responsive workspace: use available panel space, including a docked DevTools window. */
+html, body, #root { width:100%; min-width:0; }
+.shell { height:100dvh !important; width:100% !important; }
+.shell > main { container:workspace / inline-size; min-width:0; height:100dvh !important; }
+.sidebar { height:100dvh !important; }
+.dashboardPage.newLayout, .historyPageContainer, .qualityGuidePage { height:100% !important; min-height:0; max-height:100% !important; }
+.stationHeader { margin:0; min-height:46px; height:auto; padding:8px 12px; box-sizing:border-box; }
+.stationHeaderLeft, .stationHeaderRight { min-width:0; }
+.stationHeaderLeft { overflow:visible; }
+.responsiveMbsSelect { display:none; padding:6px 8px; border:1px solid var(--color-border); border-radius:7px; background:var(--color-surface-soft); color:var(--color-text); font:inherit; font-size:12px; }
+.historyModeShortLabel, .responsiveFilterToggle, .responsiveFilterClose, .responsiveDetailTabs { display:none; }
+button, input, select { touch-action:manipulation; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
+.dashboardPage[data-compact="true"] .dashboardPaneTabs { display:flex; gap:5px; padding:6px; flex-shrink:0; }
+.dashboardPage[data-compact="true"] .dashboardPaneTabs button { flex:1; min-width:0; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); color:var(--color-muted); padding:9px 4px; font-size:11px; cursor:pointer; }
+.dashboardPage[data-compact="true"] .dashboardPaneTabs button.active { background:var(--gradient-primary); color:#fff; }
+.dashboardPage[data-compact="true"] .stationMainGrid { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); height:auto !important; max-height:none !important; }
+.dashboardPage[data-compact="true"] .stationLeftPanel, .dashboardPage[data-compact="true"] .stationCenterPanel, .dashboardPage[data-compact="true"] .stationRightPanel { display:none; min-height:0; height:100%; }
+.dashboardPage[data-compact="true"][data-pane="camera"] .stationLeftPanel,
+.dashboardPage[data-compact="true"][data-pane="events"] .stationLeftPanel,
+.dashboardPage[data-compact="true"][data-pane="captures"] .stationCenterPanel,
+.dashboardPage[data-compact="true"][data-pane="analysis"] .stationRightPanel { display:flex; }
+.dashboardPage[data-compact="true"][data-pane="camera"] .eventFeedCard,
+.dashboardPage[data-compact="true"][data-pane="events"] .streamCard { display:none; }
+.dashboardPage[data-compact="true"] .streamCard { flex:1; min-height:0; }
+.dashboardPage[data-compact="true"] .streamVideoArea { flex:1; min-height:0; height:auto; max-height:45%; aspect-ratio:auto; }
+.dashboardPage[data-compact="true"] .streamVideoContainer { height:100%; min-height:0; }
+.dashboardPage[data-compact="true"] .liveStreamImg { height:100%; width:100%; object-fit:contain; }
+.dashboardPage[data-compact="true"] .eventFeedCard { flex:1; min-height:0; }
+.dashboardPage[data-compact="true"] .categoryAnalysisCard { padding:10px; }
+.dashboardPage[data-short="true"] .operatorDecisionDesc,
+.dashboardPage[data-short="true"] .operatorScanRules { display:none; }
+.dashboardPage[data-short="true"] .streamCycleBar { padding:6px; }
+.dashboardPage[data-short="true"] .catGradeProbList { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.dashboardPage[data-short="true"] .dailyAggregateSection { display:none; }
+.dashboardPage[data-short="true"] .operatorGuideTop { margin-bottom:3px; }
+.dashboardPage[data-short="true"] .streamVideoArea { max-height:35%; }
+
+@container workspace (max-width:1200px) {
+ .stationHeader { flex-wrap:wrap; gap:7px; }
+ .stationHeaderLeft { flex:1 1 auto; }
+ .stationFactoryCity { display:none; }
+ .stationHeaderActionBtn > span, .stationStatusChips .stChip > span { display:none; }
+ .stationHeaderActionBtn, .stationThemeToggleBtn { min-width:32px; min-height:32px; justify-content:center; padding:6px; }
+ .stationMbsTabs { display:none; }
+ .responsiveMbsSelect { display:block; }
+ .stationTrangkilLogo { max-width:170px; width:auto; }
+ .historyTitleBadge { font-size:10px; }
+}
+@container workspace (max-width:600px) {
+ .stationHeader { padding:6px 8px; gap:5px; }
+ .stationHeaderLeft { gap:5px; }
+ .stationHeaderRight { gap:4px; flex-wrap:nowrap; }
+ .stationLogoBadge { padding:3px; min-width:0; }
+ .stationTrangkilLogo { max-width:125px; max-height:30px; }
+ .stationClock { font-size:10px; padding:5px; }
+ .stationClock svg, .stationThemeToggleBtn > span, .historyTitleBadge { display:none; }
+ .stationStatusChips { display:none; }
+ .stationFactoryName { font-size:11px; }
+ .qualityGuideHeader { padding:12px; gap:8px; }
+ .qualityGuideHeader h1 { font-size:18px; }
+ .qualityGuideHeader p { font-size:11px; line-height:1.4; }
+ .qualityGuideContent { padding:10px; gap:8px; }
+ .qualityGuideGrid { gap:8px; }
+ .qualityGuideClassCount { display:none; }
+ .qualityGuideFooter { font-size:10px; }
+ .qualityGuideFooter > span { max-width:60%; }
+ .dashboardPage.newLayout .captureGridHeader { display:flex; flex-wrap:wrap; gap:6px; padding:8px; }
+ .dashboardPage.newLayout .captureCycleControlGroup { flex:1; width:auto; min-width:130px; justify-content:flex-end; }
+ .dashboardPage.newLayout .captureGridMeta { margin-left:auto; }
+ .captureGridTitle { font-size:11px; }
+ .cyclePickerTrigger { max-width:100%; }
+ .capturePhotoFooter { font-size:10px; }
+}
+.qualityGuidePage[data-count="1"] .qualityGuideGrid { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+.qualityGuidePage[data-count="2"] .qualityGuideGrid { grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(2,minmax(0,1fr)); }
+@container workspace (min-width:600px) {
+ .qualityGuidePage[data-count="4"] .qualityGuideGrid { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
+}
+@media (max-height:719px) {
+ .qualityGuidePage[data-count="4"] .qualityGuideGrid { grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
+}
+@media (max-width:900px) {
+ /* Touch navigation occupies a fixed bottom bar and leaves the full width to the content. */
+ .shell .sidebar, .shell.sidebar-expanded .sidebar, .shell .sidebar:hover, .shell .sidebar:focus-within {
+  top:auto !important; bottom:0 !important; height:calc(64px + env(safe-area-inset-bottom)) !important;
+  width:100% !important; min-width:0 !important; max-width:none !important; flex-direction:row !important;
+  padding:4px 6px calc(4px + env(safe-area-inset-bottom)) !important; align-items:center;
+  border-right:0 !important; border-top:1px solid rgba(56,189,248,.3); border-radius:14px 14px 0 0;
+ }
+ .shell .sidebar .brand, .shell .sidebar .sidebarMenuLabel, .shell .sidebar .sidebarUserCard, .shell .sidebar .sidebarWatermarkWrap { display:none !important; }
+ .shell .sidebarNav { flex:1; display:flex !important; flex-direction:row !important; gap:3px !important; margin:0 !important; padding:0 !important; }
+ .shell .sidebarFooter { margin:0 !important; padding:0 !important; border:0 !important; width:44px !important; flex-shrink:0; }
+ .shell .sidebarNavBtn, .shell.sidebar-expanded .sidebarNavBtn, .shell .sidebarLogout {
+  min-width:0 !important; min-height:50px !important; height:50px !important; padding:5px 2px !important;
+  flex:1; flex-direction:column !important; gap:4px !important; border-radius:9px !important; justify-content:center !important;
+ }
+ .shell .navIconBox { width:auto !important; height:auto !important; min-width:0 !important; }
+ .shell .navLabel { display:block !important; width:auto !important; opacity:1 !important; visibility:visible !important; transform:none !important; font-size:9px !important; line-height:1.1; white-space:nowrap; }
+ .shell .navActiveGlowPill, .shell .sidebarNavBtn::after, .shell .sidebarNavBtn::before { display:none !important; }
+ .shell > main, .shell.sidebar-expanded > main, .shell .sidebar:hover ~ main, .shell .sidebar:focus-within ~ main {
+  width:100% !important; margin-left:0 !important; height:calc(100dvh - 64px - env(safe-area-inset-bottom)) !important;
+  max-height:calc(100dvh - 64px - env(safe-area-inset-bottom)) !important;
+ }
+ .modal-backdrop { padding:8px !important; }
+}
+@media (min-width:901px) and (max-width:1200px) {
+ .shell { --sidebar-collapsed-width:64px; --sidebar-expanded-width:64px; }
+ .shell .sidebar { padding:10px 6px !important; }
+ .shell .sidebar .brandText, .shell .sidebar .navLabel, .shell .sidebar .sidebarUserMeta, .shell .sidebar .sidebarMenuLabel { display:none !important; }
+}
+
+/* Compact history uses the same records/actions in a card layout, with pagination. */
+.historyPageContainer[data-compact="true"] { position:relative; }
+.historyPageContainer[data-compact="true"] .historyContentBody { padding:8px 8px 0; gap:8px; }
+.historyPageContainer[data-compact="true"] .historyModeFullLabel { display:none; }
+.historyPageContainer[data-compact="true"] .historyModeShortLabel { display:inline; }
+.historyPageContainer[data-compact="true"] .historyModeTabsRow { gap:4px; }
+.historyPageContainer[data-compact="true"] .historyModeTabs { min-width:0; flex:1; }
+.historyPageContainer[data-compact="true"] .historyModeTabs button { flex:1; padding:8px 5px; font-size:11px; }
+.historyPageContainer[data-compact="true"] .historyHeaderActions { gap:4px; flex-wrap:nowrap; }
+.historyPageContainer[data-compact="true"] .historyHeaderActions .historySyncBtn span,
+.historyPageContainer[data-compact="true"] .historyHeaderActions .historyExportBtn span { display:none; }
+.historyPageContainer[data-compact="true"] .historyHeaderActions button { min-width:32px; min-height:32px; padding:5px; }
+.historyPageContainer[data-compact="true"] .responsiveFilterToggle { display:flex; align-items:center; gap:4px; border:1px solid var(--color-border); border-radius:7px; background:var(--color-surface); color:var(--color-primary); font-size:11px; cursor:pointer; }
+.historyPageContainer[data-compact="true"] .historyKpiGrid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+.historyPageContainer[data-compact="true"] .historyKpiCard { padding:6px !important; }
+.historyPageContainer[data-compact="true"] .historyKpiLabel { font-size:8px; line-height:1.25; }
+.historyPageContainer[data-compact="true"] .historyKpiValue { font-size:18px; }
+.historyPageContainer[data-compact="true"] .historyKpiUnit { font-size:9px; }
+.historyPageContainer[data-compact="true"] .historyKpiSub { display:none; }
+.historyPageContainer[data-short="true"] .historyKpiGrid { display:none; }
+.historyPageContainer[data-compact="true"] .historyCockpitFilterCard { display:none; }
+.historyPageContainer[data-compact="true"] .historyCockpitFilterCard[data-open="true"] {
+ display:flex; position:absolute; top:100px; left:8px; right:8px; z-index:45; box-shadow:var(--shadow-floating); background:var(--color-surface-solid);
+}
+.historyPageContainer[data-compact="true"] .responsiveFilterClose { display:grid; place-items:center; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text); border-radius:6px; width:30px; height:30px; cursor:pointer; }
+.historyPageContainer[data-compact="true"] .cockpitFilterGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.historyPageContainer[data-compact="true"] .filterCardHeader { flex-wrap:wrap; }
+.historyPageContainer[data-compact="true"] .filterResultsBadge { display:none; }
+.historyPageContainer[data-compact="true"] .historyActiveFiltersRow { display:none; }
+.historyPageContainer[data-compact="true"] .historyTableCardHeader { padding:7px; gap:5px; }
+.historyPageContainer[data-compact="true"] .historyTableBadge { white-space:normal; font-size:9px; line-height:1.3; }
+.historyPageContainer[data-compact="true"] .historyRecordCountBadge { font-size:10px; white-space:nowrap; }
+.historyPageContainer[data-compact="true"] .historyDataTable { display:block; height:100%; }
+.historyPageContainer[data-compact="true"] .historyDataTable thead { display:none; }
+.historyPageContainer[data-compact="true"] .historyDataTable tbody { display:grid; height:100%; align-content:start; gap:5px; padding:5px; box-sizing:border-box; }
+.historyPageContainer[data-compact="true"] .historyDataTable tr { display:grid; grid-template-columns:minmax(0,1fr) 75px 58px; gap:2px 6px; height:auto !important; min-height:0; background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; padding:6px; align-content:center; }
+.historyPageContainer[data-compact="true"] .historyDataTable td { display:none; border:0; padding:0 !important; font-size:11px !important; min-width:0; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable tbody { grid-auto-rows:minmax(0,1fr); }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(1) { display:block; grid-column:1; grid-row:1; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(7) { display:block; grid-column:2; grid-row:1; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(10) { display:block; grid-column:3; grid-row:1 / 3; align-self:center; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(4) { display:block; grid-column:1; grid-row:2; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(6) { display:block; grid-column:2; grid-row:2; }
+.historyPageContainer[data-compact="true"][data-view="trucks"] .historyDataTable td:nth-child(8) { display:block; grid-column:1 / -1; grid-row:3; }
+.historyPageContainer[data-compact="true"] .decision-badge { display:block; padding:2px 4px; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.historyPageContainer[data-compact="true"] .historyDetailBtn { min-height:30px; min-width:30px; justify-content:center; }
+.historyPageContainer[data-compact="true"] .historyDetailBtn span { display:none; }
+.historyPageContainer[data-compact="true"] .historyDeleteBtn { width:24px; padding:3px; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable tbody { grid-auto-rows:67px; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable tr { grid-template-columns:72px minmax(0,1fr) 50px; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable td:nth-child(1) { display:block; grid-column:1; grid-row:1 / 3; align-self:center; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable td:nth-child(2) { display:block; grid-column:2; grid-row:1; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable td:nth-child(4) { display:block; grid-column:2; grid-row:2; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable td:nth-child(9) { display:block; grid-column:3; grid-row:1; }
+.historyPageContainer[data-compact="true"][data-view="captures"] .historyDataTable td:nth-child(10) { display:block; grid-column:3; grid-row:2; }
+.historyPageContainer[data-compact="true"] .historyPagination { margin:0 8px 8px; padding:6px; gap:4px; font-size:10px; }
+.historyPageContainer[data-compact="true"] .historyPagination > span { display:none; }
+.historyPageContainer[data-compact="true"] .historyPagination > div { justify-content:space-between; flex:1; gap:4px; }
+.historyPageContainer[data-compact="true"] .historyPagination button { min-height:32px; padding:5px 8px; font-size:10px; }
+
+/* Detail views switch between complete panels instead of shrinking two columns into a phone. */
+.responsiveDetailTabs { flex-shrink:0; gap:6px; padding:7px 10px; border-bottom:1px solid var(--color-border); }
+.responsiveDetailTabs button { flex:1; min-width:0; min-height:34px; padding:6px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface-soft); color:var(--color-muted); font-size:12px; cursor:pointer; }
+.responsiveDetailTabs button[aria-pressed="true"] { background:var(--gradient-primary); color:#fff; border-color:transparent; }
+.capture-detail-modal { min-width:0; }
+.capture-detail-modal__header { flex-shrink:0; }
+.capture-detail-modal__header .modal-title-with-badge { min-width:0; }
+.modal-title-row { flex-wrap:wrap; }
+.capture-detail-modal__header p { overflow-wrap:anywhere; }
+.truck-detail-modal[data-compact="true"] .responsiveDetailTabs { display:flex; }
+.truck-detail-modal[data-compact="true"] .truck-detail-body { grid-template-columns:minmax(0,1fr) !important; padding:10px !important; }
+.truck-detail-modal[data-compact="true"] .truck-left-column,
+.truck-detail-modal[data-compact="true"] .truck-right-column { display:none; }
+.truck-detail-modal[data-compact="true"][data-panel="frames"] .truck-right-column { display:flex; }
+.truck-detail-modal[data-compact="true"][data-panel="summary"] .truck-left-column,
+.truck-detail-modal[data-compact="true"][data-panel="guide"] .truck-left-column { display:flex; }
+.truck-detail-modal[data-compact="true"][data-panel="summary"] .truck-grades-card,
+.truck-detail-modal[data-compact="true"][data-panel="guide"] .truck-hero-grade-card,
+.truck-detail-modal[data-compact="true"][data-panel="guide"] .truck-metadata-card { display:none; }
+.truck-detail-modal[data-compact="true"] .truck-grades-compact-guide { display:grid; grid-template-columns:1fr; gap:7px; }
+.truck-detail-modal[data-compact="true"] .truck-guide-row { padding:8px; }
+.truck-detail-modal[data-compact="true"] .truck-cycles-header-bar { flex-wrap:wrap; }
+.truck-detail-modal[data-compact="true"] .truck-cycles-log-table th,
+.truck-detail-modal[data-compact="true"] .truck-cycles-log-table td { padding:3px 4px !important; font-size:10px !important; }
+.truck-detail-modal[data-compact="true"] .truck-view-cycle-btn span { display:none; }
+.truck-detail-modal[data-compact="true"] .truck-view-cycle-btn { width:30px; height:30px; padding:4px; justify-content:center; }
+.truck-detail-modal[data-compact="true"] .modal-batch-pill,
+.truck-detail-modal[data-compact="true"] .truck-footer-hint { display:none; }
+.truck-detail-modal[data-compact="true"] .truck-table-pagination { gap:4px; padding:5px; }
+.truck-detail-modal[data-compact="true"] .truck-pag-text { font-size:10px; }
+.truck-detail-modal[data-compact="true"] .truck-pag-btn { padding:5px; font-size:10px; }
+.capture-frame-popup { height:calc(100dvh - 32px) !important; max-height:850px !important; }
+.capture-frame-popup__body { flex:1; min-height:0; overflow:hidden !important; grid-template-rows:minmax(0,1fr); }
+.capture-frame-popup__left, .capture-frame-popup__right { min-height:0; }
+.capture-frame-popup .capture-snapshot-card { flex:1; min-height:0; }
+.capture-frame-popup .snapshot-preview-container { height:100%; aspect-ratio:auto; }
+.capture-frame-popup .snapshot-preview-img { object-fit:contain !important; }
+@media (max-width:850px), (max-height:540px) {
+ .capture-frame-popup .responsiveDetailTabs { display:flex; }
+ .capture-frame-popup__body { grid-template-columns:minmax(0,1fr) !important; padding:10px !important; align-items:stretch !important; }
+ .capture-frame-popup__left, .capture-frame-popup__right { display:none; }
+ .capture-frame-popup[data-panel="image"] .capture-frame-popup__left,
+ .capture-frame-popup[data-panel="analysis"] .capture-frame-popup__right { display:flex; }
+ .capture-detail-modal__header { padding:10px !important; gap:6px; }
+ .capture-detail-modal__header h2 { font-size:14px !important; line-height:1.25; }
+ .capture-detail-modal__header p { font-size:10px; }
+ .capture-detail-modal__footer { padding:7px 10px !important; flex-shrink:0; }
+ .capture-detail-modal__footer button { min-height:32px; padding:6px !important; font-size:11px !important; }
+ .capture-frame-popup__footer { flex-wrap:wrap; gap:5px; }
+ .capture-frame-popup .dist-card-sub { display:none; }
+ .capture-frame-popup .dist-compact-list { gap:4px; }
+ .capture-frame-popup .dist-compact-row { padding:7px; }
+ .capture-frame-popup .hero-grade-title { font-size:15px; }
+ .capture-frame-popup .hero-grade-pill { font-size:22px; }
+ .capture-frame-popup .snapshot-overlay-top { flex-wrap:wrap; gap:4px; left:6px; right:6px; top:6px; }
+ .capture-frame-popup .snapshot-cam-tag { font-size:9px; max-width:100%; white-space:normal; }
+ .gradePickerMenu { max-width:calc(100vw - 48px); }
+}
+@media (max-height:540px) {
+ .truck-detail-modal[data-compact="true"] .truck-grades-compact-guide { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .truck-detail-modal[data-compact="true"] .truck-guide-row { padding:4px; }
+ .truck-detail-modal[data-compact="true"] .truck-detail-header p { display:none; }
+ .truck-detail-modal[data-compact="true"] .truck-hero-grade-header { flex-wrap:wrap; }
+ .capture-frame-popup .capture-hero-grade-card { padding:7px; }
+ .capture-frame-popup .dist-compact-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .capture-frame-popup .dist-row-desc { display:none; }
+ .capture-frame-popup .dist-row-center { display:none; }
+ .capture-frame-popup .capture-decision-card { padding:6px; }
+ .capture-frame-popup .decision-metrics-row { gap:5px; }
+ .capture-frame-popup .meta-strip-item { padding:4px; }
+ .capture-frame-popup .hero-grade-sub { display:none; }
+}
+/* Peripheral pages retain readable forms and wrap actions on narrow devices. */
+@media (max-width:700px) {
+ .loginPageLayout { grid-template-columns:minmax(0,1fr); min-height:100dvh; }
+ .loginLeftPanel { display:none; }
+ .loginRightPanel { padding:20px 16px; min-width:0; }
+ .loginFormCard { width:100%; max-width:440px; padding:20px; box-sizing:border-box; }
+ .accessPage { padding:12px !important; min-width:0; }
+ .accessMainCard, .accessToolbar, .accessRoleCardsGrid { min-width:0; }
+ .accessToolbar { flex-wrap:wrap; gap:8px; }
+ .accessTable { min-width:0; table-layout:fixed; }
+ .accessTable th, .accessTable td { padding:7px; font-size:11px; overflow-wrap:anywhere; }
+ .accessTableWrap { overflow:hidden; }
+ .accessOverlay { padding:10px; }
+ .accessModal { width:100%; min-width:0; max-height:calc(100dvh - 20px); overflow-y:auto; }
+ input, select { font-size:16px; }
+}
+@media (prefers-reduced-motion:reduce) {
+ *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+}
+
+@media (max-height:500px) {
+ .qualityGuideHeader { padding:8px 12px; }
+ .qualityGuideHeader h1 { font-size:16px; margin:2px 0; }
+ .qualityGuideHeader p { display:none; }
+ .qualityGuideContent { padding:8px; gap:6px; }
+ .qualityGuidePhoto { min-height:36px; }
+ .qualityGuideBody { padding:7px; gap:4px; }
+ .qualityGuideFooter { font-size:9px; }
+ .truck-detail-modal[data-compact="true"] .truck-hero-metrics-grid { gap:3px; }
+ .truck-detail-modal[data-compact="true"] .truck-hero-grade-main { gap:6px; }
+ .truck-detail-modal[data-compact="true"] .truck-grade-name { font-size:12px; }
+ .truck-detail-modal[data-compact="true"] .truck-metadata-card { padding:5px; }
+ .truck-detail-modal[data-compact="true"] .truck-metadata-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+ .truck-detail-modal[data-compact="true"] .truck-meta-key { font-size:8px; }
+}
+@container workspace (max-width:600px) {
+ .adminBarStatusRow { gap:4px; }
+ .adminBarHeaderBadge { font-size:8px; padding:4px; }
+ .adminBarApprovalBtn { font-size:8px; padding:4px; min-width:0; white-space:normal; }
+}
+
+@media (max-width:700px) {
+ .policyRolesSummaryGrid, .accessRoleGrid { grid-template-columns:minmax(0,1fr); }
+ .accessPolicyHero, .accessPolicyHeader, .accessCardHeader { flex-wrap:wrap; }
+ .accessPolicyTitleGroup { min-width:0; }
+ .accessTabs { width:100%; min-width:0; }
+ .accessTabs button { flex:1; padding:7px 5px; font-size:11px; min-width:0; }
+ .accessTable { display:block; }
+ .accessTable thead { display:none; }
+ .accessTable tbody { display:grid; gap:10px; padding:8px; }
+ .accessTable tr { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); border:1px solid var(--color-border); border-radius:10px; padding:8px; }
+ .accessTable td { display:block; width:auto; min-width:0; border:0; }
+ .accessTable td::before { content:attr(data-label); display:block; font-size:10px; color:var(--color-muted); margin-bottom:5px; }
+ .accessTable td:nth-child(3) { grid-column:1 / -1; }
+ .accessActions { flex-wrap:wrap; gap:5px; }
+ .approvalItemMain, .approvalHistoryMain { flex-wrap:wrap; }
+ .loginPanel { min-width:0; width:100%; box-sizing:border-box; }
+ .accessModal input, .accessModal select { box-sizing:border-box; }
+}
+
+@media (min-width:901px) and (max-height:600px) {
+ .shell .sidebar, .shell.sidebar-expanded .sidebar { padding-top:8px !important; padding-bottom:8px !important; }
+ .sidebar .brand { margin-bottom:8px !important; }
+ .sidebar .brandMark { width:40px !important; height:40px !important; min-width:40px !important; }
+ .sidebar .sidebarMenuLabel, .sidebar .sidebarUserCard, .sidebar .sidebarWatermarkWrap { display:none !important; }
+ .sidebar .sidebarNav { gap:5px !important; }
+ .shell .sidebarNavBtn { height:40px !important; min-height:40px !important; }
+ .shell .sidebarFooter { padding-top:5px !important; }
+}
+
+.truck-detail-modal[data-compact="true"][data-panel="summary"] .truck-metadata-card { display:none; }
+.truck-detail-modal[data-compact="true"][data-panel="metadata"] .truck-left-column { display:flex; }
+.truck-detail-modal[data-compact="true"][data-panel="metadata"] .truck-hero-grade-card,
+.truck-detail-modal[data-compact="true"][data-panel="metadata"] .truck-grades-card { display:none; }
+@media (max-width:500px) { .truck-detail-modal .responsiveDetailTabs button { font-size:11px; padding:5px; } }
+
+.responsiveAnalysisTab { display:none; }
+.dashboardPage[data-short="true"] .responsiveAnalysisTab { display:inline-flex; }
+.dashboardPage[data-short="true"] .catAnalysisHeader { flex-wrap:wrap; gap:5px; }
+.dashboardPage[data-short="true"] .realtimeAggregateArea,
+.dashboardPage[data-short="true"] .dailyAggregateScrollArea { min-height:0; flex:1; }
+.dashboardPage[data-short="true"] .catGradeProbList { flex:0 0 auto; min-height:110px; overflow:hidden !important; }
+.dashboardPage[data-short="true"] .catMetricsTitle { flex-shrink:0; }
+.dashboardPage[data-short="true"] .cycleConsistencyCard,
+.dashboardPage[data-short="true"] .dailyTimelineHeader,
+.dashboardPage[data-short="true"] .dailyCycleTimelineList { display:none; }
+.dashboardPage[data-short="true"][data-analysis-view="consistency"] .realtimeAggregateArea > :not(.cycleConsistencyCard) { display:none; }
+.dashboardPage[data-short="true"][data-analysis-view="consistency"] .cycleConsistencyCard { display:flex; margin-top:0; }
+.dashboardPage[data-short="true"][data-analysis-view="timeline"] .dailyAggregateScrollArea > :not(.dailyTimelineHeader):not(.dailyCycleTimelineList) { display:none; }
+.dashboardPage[data-short="true"][data-analysis-view="timeline"] .dailyTimelineHeader,
+.dashboardPage[data-short="true"][data-analysis-view="timeline"] .dailyCycleTimelineList { display:flex; }
+.dashboardPage[data-short="true"] .catProbName { display:none; }
+.dashboardPage[data-short="true"] .catDivider { margin:3px 0; }
+
+.dashboardPage[data-short="true"] .catKpiRow { display:none; }
+.dashboardPage[data-short="true"] .catGradeRow { padding:5px; gap:8px; }
+.dashboardPage[data-short="true"] .catDonutWrap { width:44px; height:44px; }
+.dashboardPage[data-short="true"] .catDonutWrap > svg { width:44px; height:44px; }
+.dashboardPage[data-short="true"] .catGradeValue { font-size:20px; }
+.dashboardPage[data-short="true"] .catDonutCenter strong { font-size:13px; }
+.dashboardPage[data-short="true"] .catDonutCenter span { font-size:7px; }
+.dashboardPage[data-short="true"] .realtimeAggregateArea,
+.dashboardPage[data-short="true"] .dailyAggregateScrollArea { justify-content:flex-start; gap:4px; height:auto; }
+
+.dashboardPage[data-short="true"] .catGradeProbList + .catDivider { display:none; }
+
+.historyPageContainer, .qualityGuidePage { gap:0 !important; }
+@media (min-width:901px) and (max-width:1200px) {
+ .sidebar .sidebarWatermarkWrap { display:none !important; }
+}
+@media (max-width:700px) {
+ .historyPageContainer .cockpitInput, .historyPageContainer .cockpitSelect,
+ .responsiveMbsSelect, .accessModal input:not([type="checkbox"]), .accessModal select { font-size:16px; }
+}
+
+.streamCard { container:stream / inline-size; }
+@container stream (max-width:430px) {
+ .adminBarStatusRow { gap:4px; }
+ .adminBarHeaderBadge { font-size:8px; padding:4px; }
+ .adminBarApprovalBtn { flex:1; min-width:0; white-space:normal; font-size:8px; padding:4px; justify-content:center; }
+}
+@media (max-width:850px), (max-height:540px) {
+ .capture-frame-popup[data-panel="image"] .capture-meta-strip,
+ .capture-frame-popup[data-panel="image"] .capture-decision-card { display:none; }
+ .capture-frame-popup[data-panel="decision"] .capture-frame-popup__left { display:flex; }
+ .capture-frame-popup[data-panel="decision"] .capture-snapshot-card { display:none; }
+ .capture-frame-popup[data-panel="image"] .capture-frame-popup__left { justify-content:center; }
+ .capture-frame-popup[data-panel="image"] .capture-snapshot-card { flex:0 1 auto; max-height:100%; background:var(--color-surface-soft); }
+ .capture-frame-popup[data-panel="image"] .snapshot-preview-container { height:auto; max-height:100%; background:var(--color-surface-soft); }
+ .capture-frame-popup[data-panel="image"] .snapshot-preview-img { height:auto; max-height:calc(100dvh - 240px); }
+}
+@media (max-height:540px) { .capture-frame-popup .capture-detail-modal__header p { display:none; } }
+
+.loginPageLayout { height:100dvh; overflow-y:auto; }
+.loginLeftPanel, .loginRightPanel { box-sizing:border-box; min-width:0; }
+@media (max-width:700px) {
+ .pageHeader { flex-direction:column; align-items:stretch; padding:12px; gap:10px; }
+ .headerBrandGroup, .headerTitles { width:100%; min-width:0; }
+ .pageHeader h1 { font-size:20px; }
+ .headerUtilityGroup { width:100%; flex-wrap:wrap; justify-content:space-between; gap:7px; }
+ .headerSubtitle { font-size:12px; line-height:1.5; }
+ .headerClock, .systemHealthBadge { font-size:10px; padding:6px 9px; }
+ .accessPolicyBanner { padding:12px; }
+ .policyBannerHead { gap:8px; }
+ .policyIconBox { flex-shrink:0; }
+ .accessEmptyCell { grid-column:1 / -1; }
+}
+@media (max-height:600px) {
+ .loginLeftPanel { padding:24px; }
+ .loginRightPanel { padding:16px; }
+}
+
+.dashboardPage[data-short="true"] .catGradeProbRow { min-height:0; box-sizing:border-box; }
+.dashboardPage[data-short="true"] .catGradeProbList { grid-template-rows:repeat(4,minmax(0,1fr)); height:110px; }
+@media (max-height:450px) {
+ .dashboardPage[data-compact="true"] .streamOperatorGuideCard,
+ .dashboardPage[data-compact="true"] .adminBarStatusRow { display:none; }
+ .dashboardPage[data-compact="true"] .streamVideoArea { max-height:none; }
+ .dashboardPage[data-compact="true"] .telItem { padding:4px; }
+ .dashboardPage[data-compact="true"] .telLabel { font-size:7px; }
+ .dashboardPage[data-compact="true"] .telItem strong { font-size:10px; }
+ .dashboardPage[data-compact="true"] .startCycleBtn, .dashboardPage[data-compact="true"] .stopCycleBtn { min-height:32px; padding:6px; font-size:12px; }
+ .dashboardPage[data-compact="true"] .cycleBarSubRow { margin-top:3px; font-size:9px; }
+ .dashboardPage[data-short="true"] .catMetricsTitle, .dashboardPage[data-short="true"] .catDivider { display:none; }
+ .dashboardPage[data-short="true"] .catGradeRow { padding:3px; }
+ .dashboardPage[data-short="true"] .catDonutWrap, .dashboardPage[data-short="true"] .catDonutWrap > svg { width:32px; height:32px; }
+ .dashboardPage[data-short="true"] .dailySummaryRight { display:none; }
+ .dashboardPage[data-short="true"] .dailyFactorySummaryCard { padding:5px; }
+ .dashboardPage[data-short="true"] .dailyGradeBadge { font-size:18px; }
+}
+
+@media (max-height:450px) {
+ .dashboardPage[data-short="true"] .catGradeInfo { flex-direction:row; align-items:center; flex-wrap:wrap; gap:6px; }
+ .dashboardPage[data-short="true"] .catGradeLabel { display:none; }
+ .dashboardPage[data-short="true"] .catGradeValue { line-height:1.2; white-space:nowrap; }
+ .dashboardPage[data-short="true"] .catGradeSub { flex:1; min-width:0; font-size:10px; line-height:1.2; }
+ .dashboardPage[data-short="true"] .catDonutWrap svg { width:32px !important; height:32px !important; }
+}
+
+@media (max-width:900px) {
+ .shell > main { box-sizing:border-box; padding-top:env(safe-area-inset-top) !important; padding-left:env(safe-area-inset-left) !important; padding-right:env(safe-area-inset-right) !important; }
+ .shell .sidebar, .shell.sidebar-expanded .sidebar, .shell .sidebar:hover, .shell .sidebar:focus-within { padding-left:calc(6px + env(safe-area-inset-left)) !important; padding-right:calc(6px + env(safe-area-inset-right)) !important; }
+ .modal-backdrop { box-sizing:border-box; padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left)) !important; }
+ .capture-detail-modal.capture-frame-popup, .capture-detail-modal.truck-detail-modal { max-height:min(850px,calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important; }
+}

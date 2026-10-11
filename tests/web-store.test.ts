@@ -59,3 +59,37 @@ test("failed backend tapping sync cannot modify legacy records", async () => {
   await assert.rejects(store.getState().syncTappingData([{ id: "session_legacy", truckCode: "changed" }, { id: "backend", truckCode: "failed" }]));
   assert.equal(JSON.parse(saved.get("tebu-truck-sessions")!)[0].truckCode, "old");
 });
+
+
+test("a completed poll populates the UI while the next poll is still pending", async () => {
+  let resolveFirst!: (response: Response) => void;
+  let resolveSecond!: (response: Response) => void;
+  const firstResponse = new Promise<Response>(done => resolveFirst = done);
+  const secondResponse = new Promise<Response>(done => resolveSecond = done);
+  let calls = 0;
+  const { store } = storeModule(async () => ++calls <= 2 ? firstResponse : secondResponse);
+  const first = store.getState().refresh();
+  const second = store.getState().refresh();
+  resolveFirst(Response.json([{ id: "first" }]));
+  await first;
+  assert.equal(store.getState().history[0]?.id, "first");
+  resolveSecond(Response.json([{ id: "second" }]));
+  await second;
+  assert.equal(store.getState().history[0]?.id, "second");
+});
+
+test("a failed overlapping poll preserves data accepted while it was pending", async () => {
+  let resolveFirst!: (response: Response) => void;
+  let rejectSecond!: (error: Error) => void;
+  const firstResponse = new Promise<Response>(done => resolveFirst = done);
+  const secondResponse = new Promise<Response>((_, reject) => rejectSecond = reject);
+  let calls = 0;
+  const { store } = storeModule(async () => ++calls <= 2 ? firstResponse : secondResponse);
+  const first = store.getState().refresh();
+  const second = store.getState().refresh();
+  resolveFirst(Response.json([{ id: "preserved" }]));
+  await first;
+  rejectSecond(new Error("slow network disconnected"));
+  await second;
+  assert.equal(store.getState().history[0]?.id, "preserved");
+});

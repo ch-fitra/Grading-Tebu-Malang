@@ -1,5 +1,6 @@
+import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade } from "../utils/grade-data";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   History,
   Calendar,
@@ -35,7 +36,7 @@ import { TruckInspectionDetailModal } from "./TruckInspectionDetailModal";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
-import { TRANGKIL_GRADES, type TrangkilGradeCode } from "./DashboardPage";
+import { TRANGKIL_GRADES, type TrangkilGradeCode } from "../utils/grade-guide";
 import { backendUrl } from "../utils/api";
 import type { TruckInspectionSession, InferenceResult, Grade } from "../types";
 
@@ -102,6 +103,32 @@ export function HistoryPage() {
   const [selectedDateFilter, setSelectedDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
   const [selectedLineFilter, setSelectedLineFilter] = useState<number | "all">("all");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string | "all">("all");
+
+  const panelSize = usePanelSize<HTMLElement>();
+  const compactLayout = panelSize.width < 1050 || panelSize.height < 560;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [compactCyclePageSize, setCompactCyclePageSize] = useState(5);
+  const [captureDetailPanel, setCaptureDetailPanel] = useState("image");
+  useEffect(() => { setCaptureDetailPanel("image"); }, [selectedCapture?.id]);
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [capturePageSize, setCapturePageSize] = useState(5);
+  const [historyRowHeight, setHistoryRowHeight] = useState(52);
+  const historyPageSize = activeTab === "trucks" ? (compactLayout ? compactCyclePageSize : 5) : capturePageSize;
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [activeTab, searchQuery, selectedDateFilter, selectedLineFilter, selectedStatusFilter]);
+  useEffect(() => {
+    const table = tableWrapRef.current;
+    if (!table) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setCapturePageSize(Math.max(1, Math.floor((entry.contentRect.height - (compactLayout ? 0 : 38)) / (compactLayout ? 72 : 52))));
+      setCompactCyclePageSize(Math.max(1, Math.min(5, Math.floor(entry.contentRect.height / 68))));
+      setHistoryRowHeight(Math.max(1, Math.floor((entry.contentRect.height - 38) / 5)));
+    });
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, [compactLayout]);
 
   // Clock ticker & theme
   const [clock, setClock] = useState(new Date());
@@ -219,6 +246,12 @@ export function HistoryPage() {
   }, [visibleHistory, visibleTrucks, searchQuery, selectedDateFilter, selectedLineFilter, cameras]);
 
   // Summary KPIs based on filtered or active records
+  const historyRecordCount = activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length;
+  const historyPages = Math.max(1, Math.ceil(historyRecordCount / historyPageSize));
+  const safeHistoryPage = Math.min(historyPage, historyPages);
+  const historyPageStart = (safeHistoryPage - 1) * historyPageSize;
+  const pagedTrucks = filteredTrucks.slice(historyPageStart, historyPageStart + historyPageSize);
+  const pagedCaptures = filteredHistory.slice(historyPageStart, historyPageStart + historyPageSize);
   const totalCyclesCount = filteredTrucks.length;
   const completedCyclesCount = filteredTrucks.filter(t => t.status === "completed").length;
   const totalCapturesCount = filteredHistory.length;
@@ -342,7 +375,7 @@ export function HistoryPage() {
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
-    <section className="historyPageContainer">
+    <section ref={panelSize.ref} className="historyPageContainer" data-view={activeTab} data-compact={compactLayout} data-short={panelSize.height < 500}>
       {/* ─── Top Station Header (Matches Dashboard Cockpit) ─── */}
       <div className="stationHeader">
         <div className="stationHeaderLeft">
@@ -458,7 +491,7 @@ export function HistoryPage() {
               onClick={() => setActiveTab("trucks")}
             >
               <RotateCcw size={13} />
-              <span>Riwayat Siklus Pemindaian ({filteredTrucks.length} Siklus)</span>
+              <span className="historyModeFullLabel">Riwayat Siklus Pemindaian ({filteredTrucks.length} Siklus)</span><span className="historyModeShortLabel">Siklus ({filteredTrucks.length})</span>
             </button>
             <button
               type="button"
@@ -466,11 +499,12 @@ export function HistoryPage() {
               onClick={() => setActiveTab("captures")}
             >
               <Camera size={13} />
-              <span>Tangkapan Frame Kamera ({filteredHistory.length} Frame)</span>
+              <span className="historyModeFullLabel">Tangkapan Frame Kamera ({filteredHistory.length} Frame)</span><span className="historyModeShortLabel">Frame ({filteredHistory.length})</span>
             </button>
           </div>
 
           <div className="historyHeaderActions">
+            <button type="button" className="responsiveFilterToggle" aria-label="Filter history" aria-expanded={filtersOpen} aria-controls="history-filters" onClick={() => setFiltersOpen(open => !open)}><Filter size={14} /><span>Filter {activeFiltersCount > 0 ? `(${activeFiltersCount})` : ""}</span></button>
             {activeTab === "trucks" && (
               <button
                 type="button"
@@ -541,7 +575,7 @@ export function HistoryPage() {
         </div>
 
         {/* ─── Cockpit Filter & Search Console ─── */}
-        <div className="historyCockpitFilterCard">
+        <div id="history-filters" className="historyCockpitFilterCard" data-open={filtersOpen}>
           {/* Top Console Bar */}
           <div className="filterCardHeader">
             <div className="filterHeaderLeft">
@@ -558,6 +592,7 @@ export function HistoryPage() {
             </div>
 
             <div className="filterHeaderRight">
+              <button type="button" className="responsiveFilterClose" onClick={() => setFiltersOpen(false)} aria-label="Tutup filter"><X size={16} /></button>
               <span className="filterResultsBadge">
                 Ditemukan <strong>{activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length}</strong> {activeTab === "trucks" ? "Siklus" : "Frame"}
               </span>
@@ -717,12 +752,12 @@ export function HistoryPage() {
             </div>
             <div className="historyTableMetaRight">
               <span className="historyRecordCountBadge">
-                Menampilkan {activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length} data
+                {historyRecordCount === 0 ? "Belum ada data" : `${historyPageStart + 1}–${Math.min(historyPageStart + historyPageSize, historyRecordCount)} dari ${historyRecordCount} data`}
               </span>
             </div>
           </div>
 
-          <div className="historyTableWrap">
+          <div className="historyTableWrap" ref={tableWrapRef}>
             {activeTab === "trucks" ? (
               filteredTrucks.length === 0 ? (
                 <div className="historyEmptyState">
@@ -761,8 +796,8 @@ export function HistoryPage() {
                       <th style={{ textAlign: "right" }}>Aksi</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {filteredTrucks.map((row) => {
+                  <tbody style={compactLayout ? { gridTemplateRows: `repeat(${historyPageSize}, minmax(0, 1fr))` } : undefined}>
+                    {pagedTrucks.map((row) => {
                       const gradeCode = cycleGrade(row);
                       const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
                       const endTime = row.completedAt
@@ -774,7 +809,7 @@ export function HistoryPage() {
                         : null;
 
                       return (
-                        <tr key={row.id}>
+                        <tr key={row.id} style={{ height: historyRowHeight }}>
                           <td>
                             <div className="truckCodeCell">
                               <Truck size={13} className="truckIcon" />
@@ -911,7 +946,7 @@ export function HistoryPage() {
                 <table className="historyDataTable">
                   <thead>
                     <tr>
-                      <th style={{ width: "65px" }}>Preview</th>
+                      <th style={{ width: "92px" }}>Preview</th>
                       <th>Waktu Deteksi</th>
                       <th>Kamera MBS</th>
                       <th>Grade Mutu</th>
@@ -924,7 +959,7 @@ export function HistoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredHistory.map((row) => {
+                    {pagedCaptures.map((row) => {
                       const g = normalizeGrade(row.grade);
                       const curConfig = TRANGKIL_GRADES.find(item => item.code === g) || TRANGKIL_GRADES[1];
                       const confPct = Math.round((row.confidence ?? 0) * 100);
@@ -1021,6 +1056,15 @@ export function HistoryPage() {
         </div>
       </div>
 
+      <nav className="historyPagination" aria-label="Halaman riwayat">
+        <span>{historyRecordCount} {activeTab === "trucks" ? "siklus" : "frame"} · {historyPageSize} data per halaman</span>
+        <div>
+          <button type="button" disabled={safeHistoryPage === 1} onClick={() => setHistoryPage(safeHistoryPage - 1)}>Sebelumnya</button>
+          <strong>Halaman {safeHistoryPage} / {historyPages}</strong>
+          <button type="button" disabled={safeHistoryPage === historyPages} onClick={() => setHistoryPage(safeHistoryPage + 1)}>Berikutnya</button>
+        </div>
+      </nav>
+
       {/* ─── Truck Inspection Detail Modal ─── */}
       {selectedTruckSession && (
         <TruckInspectionDetailModal
@@ -1065,7 +1109,7 @@ export function HistoryPage() {
             aria-labelledby="capture-modal-title"
             style={{ zIndex: 10000 }}
           >
-            <div className="capture-detail-modal capture-frame-popup" onClick={(e) => e.stopPropagation()}>
+            <div className="capture-detail-modal capture-frame-popup" data-panel={captureDetailPanel} onClick={(e) => e.stopPropagation()}>
               {/* Header */}
               <div className="capture-detail-modal__header">
                 <div className="modal-title-with-badge">
@@ -1089,6 +1133,11 @@ export function HistoryPage() {
               </div>
 
               {/* Body */}
+              <nav className="responsiveDetailTabs" aria-label="Tampilan detail frame">
+                <button aria-pressed={captureDetailPanel === "image"} onClick={() => setCaptureDetailPanel("image")}>Gambar</button>
+                <button aria-pressed={captureDetailPanel === "decision"} onClick={() => setCaptureDetailPanel("decision")}>Informasi & Keputusan</button>
+                <button aria-pressed={captureDetailPanel === "analysis"} onClick={() => setCaptureDetailPanel("analysis")}>Analisis Mutu</button>
+              </nav>
               <div className="capture-frame-popup__body">
                 {/* Left Column: Image + Metadata Chips + Factory Decision */}
                 <div className="capture-frame-popup__left">

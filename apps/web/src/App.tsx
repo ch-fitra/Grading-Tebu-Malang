@@ -1,8 +1,9 @@
-import { Gauge, History, LogOut, Users, Crown, Activity, Shield } from "lucide-react";
+import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAppStore } from "./store";
 import { LoginPage } from "./components/LoginPage";
 import { DashboardPage } from "./components/DashboardPage";
+import { QualityGuidePage } from "./components/QualityGuidePage";
 import { HistoryPage } from "./components/HistoryPage";
 import { PoweredByWatermark } from "./components/shared/PoweredByWatermark";
 import { AccessManagement } from "./components/AccessManagement";
@@ -14,6 +15,7 @@ const websocketUrl = window.sugarcaneDesktop?.websocketUrl ?? (configuredWebsock
 const tabs = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "history", label: "History", icon: History },
+  { id: "guide", label: "Panduan Mutu", icon: BookOpen },
   { id: "access", label: "Users & Roles", icon: Users }
 ] as const;
 
@@ -29,7 +31,7 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
-    const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", access: "user.read" };
+    const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", access: "user.read" };
     if (!permissions.includes(required[tab])) {
       const first = tabs.find(item => permissions.includes(required[item.id]));
       if (first) setTab(first.id);
@@ -103,7 +105,7 @@ export default function App() {
 
         <nav className="sidebarNav">
           {tabs.filter(item => {
-            const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", access: "user.read" };
+            const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", access: "user.read" };
             return permissions.includes(required[item.id]);
           }).map((item) => {
             const Icon = item.icon;
@@ -115,6 +117,7 @@ export default function App() {
                 onClick={() => setTab(item.id)} 
                 data-tooltip={item.label} 
                 aria-label={item.label}
+                aria-current={isActive ? "page" : undefined}
               >
                 <span className="navIconBox">
                   <Icon size={20} />
@@ -163,8 +166,9 @@ export default function App() {
           </div>
         </div>
       </aside>
-      <main className={tab === "dashboard" ? "dashboardMainFixed" : ""}>
+      <main className={(tab === "dashboard" || tab === "guide" || tab === "history") ? "dashboardMainFixed" : ""}>
         {tab === "dashboard" && permissions.includes("dashboard.read") && <DashboardPage />}
+        {tab === "guide" && permissions.includes("dashboard.read") && <QualityGuidePage />}
         {tab === "history" && permissions.includes("history.read") && <HistoryPage />}
         {tab === "access" && permissions.includes("user.read") && <AccessManagement />}
       </main>

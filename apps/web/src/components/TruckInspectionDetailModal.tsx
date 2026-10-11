@@ -1,5 +1,6 @@
+import { usePanelSize } from "../hooks/usePanelSize";
 import { dominantGrade } from "../utils/grade-data";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   X,
   Truck,
@@ -21,7 +22,7 @@ import {
   Factory
 } from "lucide-react";
 import type { TruckInspectionSession, InferenceResult } from "../types";
-import { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "./DashboardPage";
+import { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "../utils/grade-guide";
 
 interface TruckInspectionDetailModalProps {
   session: TruckInspectionSession;
@@ -72,9 +73,31 @@ function resolveMbsInfo(line?: number, truckCode?: string) {
 }
 
 export function TruckInspectionDetailModal({ session, history, onClose, onViewCapture }: TruckInspectionDetailModalProps) {
+  const modalSize = usePanelSize<HTMLDivElement>();
+  const compactLayout = modalSize.width < 850 || modalSize.height < 540;
+  const [detailPanel, setDetailPanel] = useState("frames");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedGradeFilter, setSelectedGradeFilter] = useState<string | "all">("all");
-  const pageSize = 8;
+  const [pageSize, setPageSize] = useState(10);
+  const frameTableRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = frameTableRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.height > 0) setPageSize(compactLayout ? Math.max(1, Math.min(10, Math.floor((entry.contentRect.height - 28) / 32))) : 10);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [compactLayout, detailPanel]);
+  const [gradePickerOpen, setGradePickerOpen] = useState(false);
+  const gradePickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (!gradePickerRef.current?.contains(event.target as Node)) setGradePickerOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
 
   // Filter rekaman capture yang berasosiasi dengan sesi inspeksi truk ini
   const sessionCaptures = history.filter(item => {
@@ -128,7 +151,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
       aria-labelledby="modal-title-truck-detail"
     >
       <div 
-        className="capture-detail-modal truck-detail-modal" 
+        ref={modalSize.ref} className="capture-detail-modal truck-detail-modal" data-compact={compactLayout} data-panel={detailPanel}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Modal */}
@@ -160,6 +183,9 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
         </div>
 
         {/* Body Modal: 2 Kolom Seimbang (Kiri: Evaluasi Mutu & Metadata | Kanan: Log Siklus Deteksi) */}
+        <nav className="responsiveDetailTabs" aria-label="Tampilan detail siklus">
+          {[['summary', 'Ringkasan'], ['metadata', 'Informasi'], ['frames', `${pageSize} Frame`], ['guide', 'Panduan']].map(([id, label]) => <button key={id} aria-pressed={detailPanel === id} onClick={() => setDetailPanel(id)}>{label}</button>)}
+        </nav>
         <div className="capture-detail-modal__body truck-detail-body">
           {/* Kolom Kiri */}
           <div className="truck-left-column">
@@ -317,29 +343,40 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               </div>
 
               {sortedCaptures.length > 0 && (
-                <div className="cycle-detail-grade-filter">
+                <div className="cycle-detail-grade-filter" ref={gradePickerRef} onKeyDown={(event) => {
+                  if (event.key === "Escape" && gradePickerOpen) {
+                    event.stopPropagation();
+                    setGradePickerOpen(false);
+                    gradePickerRef.current?.querySelector<HTMLButtonElement>(".gradePickerTrigger")?.focus();
+                  }
+                }}>
                   <ShieldCheck size={11} className="filter-icon" />
                   <div className="cycle-grade-select-wrap">
-                    <select
-                      value={selectedGradeFilter}
-                      onChange={(e) => {
-                        setSelectedGradeFilter(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className={`cycle-grade-select ${selectedGradeFilter !== "all" ? "active" : ""}`}
-                      title="Filter mutu tangkapan frame siklus ini"
-                    >
-                      <option value="all">Semua Mutu ({sortedCaptures.length})</option>
-                      {TRANGKIL_GRADES.map((tg) => {
-                        const count = sortedCaptures.filter(c => normalizeGrade(c.grade) === tg.code).length;
-                        return (
-                          <option key={tg.code} value={tg.code} disabled={count === 0}>
-                            {tg.label} ({tg.name}) — {count} frame
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <ChevronDown size={11} className="filter-chevron" />
+                    <button type="button" className="gradePickerTrigger" aria-haspopup="listbox" aria-expanded={gradePickerOpen}
+                      aria-label="Filter mutu frame" onClick={() => setGradePickerOpen(open => !open)}>
+                      <span>{selectedGradeFilter === "all" ? "Semua Mutu" : `MBS ${selectedGradeFilter}`}</span>
+                      <span className="gradePickerCount">{filteredCaptures.length} frame</span>
+                      <ChevronDown size={13} />
+                    </button>
+                    {gradePickerOpen && (
+                      <div className="gradePickerMenu" role="listbox" aria-label="Pilihan mutu frame" onKeyDown={event => {
+                        const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+                        const index = options.indexOf(document.activeElement as HTMLButtonElement);
+                        const next = event.key === "ArrowDown" ? (index + 1) % options.length : event.key === "ArrowUp" ? (index - 1 + options.length) % options.length : event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : null;
+                        if (next !== null) { event.preventDefault(); options[next]?.focus(); }
+                      }}>
+                        <div className="gradePickerMenuHeading">Pilih kelas mutu</div>
+                        {[{ code: "all", label: "Semua Mutu", name: "Seluruh frame siklus", color: "#2563eb" }, ...TRANGKIL_GRADES].map(grade => {
+                          const count = grade.code === "all" ? sortedCaptures.length : sortedCaptures.filter(c => normalizeGrade(c.grade) === grade.code).length;
+                          return <button type="button" key={grade.code} role="option" aria-selected={selectedGradeFilter === grade.code} disabled={count === 0}
+                            onClick={() => { setSelectedGradeFilter(grade.code); setCurrentPage(1); setGradePickerOpen(false); gradePickerRef.current?.querySelector<HTMLButtonElement>(".gradePickerTrigger")?.focus(); }}>
+                            <span className="gradePickerDot" style={{ background: grade.color }} />
+                            <span className="gradePickerOptionText"><strong>{grade.label}</strong><small>{grade.name}</small></span>
+                            <span className="gradePickerCount">{count}</span>
+                          </button>;
+                        })}
+                      </div>
+                    )}
                   </div>
                   {selectedGradeFilter !== "all" && (
                     <button
@@ -381,7 +418,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               </div>
             ) : (
               <div className="truck-cycles-table-wrapper">
-                <div className="truck-table-scroll-area">
+                <div className="truck-table-scroll-area" ref={frameTableRef}>
                   <table className="truck-cycles-log-table">
                     <thead>
                       <tr>
