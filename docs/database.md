@@ -1,14 +1,29 @@
-# Database
+﻿# Database
 
-PostgreSQL is the active database target. The repeatable schemas are in `database/postgres/001_initial.sql`, `002_rbac.sql`, and `003_role_visibility.sql`; they cover operational data plus users, roles, and permissions. No camera, model, inference, or inspection example data is inserted.
+Proyek menggunakan dua database PostgreSQL:
+
+- `sugarcane`: data aplikasi, akun, role, kamera, inspeksi, dan persetujuan. Koneksi menggunakan `DATABASE_URL`.
+- `sugarcane_ai`: konfigurasi kamera/model AI, frame deteksi, dan ringkasan siklus. Koneksi menggunakan `AI_DATABASE_URL`.
+
+## Database aplikasi
+
+Migrasi aktif berada di `database/postgres/` (001 sampai 005):
 
 ```powershell
 npm run db:up
 npm run db:migrate
 ```
 
-Set `DATABASE_REQUIRED=true` outside local UI development so the API fails fast instead of using its volatile fallback repository.
+`db:up` hanya diperlukan jika memakai Docker Compose. PostgreSQL wajib tersedia sebelum API dijalankan. Sesuaikan host, port, nama database, dan kredensial pada `.env` bila memakai server sendiri.
 
-`DATABASE_REQUIRED=true` is also the default in this project: the API will not start without PostgreSQL. The Docker configuration uses port `5432`; this workstation's installed PostgreSQL service uses port `5433`, so its local `.env` is configured separately.
+## Database AI
 
-`database/migrations/001_initial.sql`, `database/seed/seed.sql`, and `docs/sql-server-ssms.md` are retained only as audited SQL Server reference material. They are not executed by the PostgreSQL workflow.
+Service AI menjalankan migrasi dari `apps/ai-service/db/migrations.py` saat startup. Service mencoba membuat `sugarcane_ai` jika belum tersedia. User membutuhkan izin membuat database, atau administrator harus menyiapkannya sebelum startup.
+
+Frame dan siklus tersimpan melalui `apps/ai-service/db/repository.py`. Snapshot lokal berada di `apps/ai-service/storage/snapshots/`; konfigurasi model berada di `apps/ai-service/models/active/config.json`.
+
+## Pemeliharaan
+
+Backup kedua database beserta model, konfigurasi ROI, dan snapshot yang diperlukan. `npm run db:down` menghentikan database Docker tanpa menghapus volume. Hindari `docker compose down -v` kecuali memang ingin menghapus seluruh data volume.
+
+Tes integrasi menggunakan schema sementara; jalankan pada database pengembangan dengan izin yang sesuai. Referensi SQL Server lama tidak digunakan oleh runtime PostgreSQL.
