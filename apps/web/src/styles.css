@@ -3198,11 +3198,11 @@ button:disabled {
   z-index: 999 !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
-  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1), 
-              min-width 220ms cubic-bezier(0.16, 1, 0.3, 1), 
-              max-width 220ms cubic-bezier(0.16, 1, 0.3, 1), 
-              padding 220ms cubic-bezier(0.16, 1, 0.3, 1), 
-              box-shadow 220ms ease !important;
+  transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              min-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              max-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              padding 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 200ms ease !important;
 }
 
 .shell.sidebar-expanded .sidebar {
@@ -3222,8 +3222,12 @@ main {
   padding: 0 !important;
   position: relative !important;
   background: var(--color-bg) !important;
-  transition: margin-left 220ms cubic-bezier(0.16, 1, 0.3, 1), 
-              width 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: margin-left 260ms cubic-bezier(0.22, 1, 0.36, 1),
+              width 260ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell .sidebar, .shell > main { transition-duration: 0ms !important; }
 }
 
 .shell.sidebar-expanded main {
@@ -3232,34 +3236,6 @@ main {
 }
 
 /* Brand Header & Jewel-Cut Logo Tile */
-.sidebarToggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 32px;
-  height: 30px;
-  min-height: 30px;
-  flex-shrink: 0;
-  align-self: center;
-  margin: 0 0 10px;
-  padding: 5px;
-  border: 1px solid rgba(148, 163, 184, .25);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, .04);
-  color: #cbd5e1;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-.sidebarToggle:hover { color: #fff; background: rgba(56, 189, 248, .12); border-color: rgba(56, 189, 248, .5); }
-.sidebarToggle:focus-visible { outline: 2px solid #38bdf8; outline-offset: 3px; }
-.sidebarToggle svg { flex-shrink: 0; }
-.sidebarToggleLabel { display: none; white-space: nowrap; }
-.shell.sidebar-expanded .sidebarToggle { width: 100%; }
-.shell.sidebar-expanded .sidebarToggleLabel { display: inline; }
-@media (max-width:1200px) { .sidebarToggle { display:none; } }
-
 .brand {
   display: flex !important;
   align-items: center !important;
@@ -16907,4 +16883,107 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
  .shell .sidebar, .shell.sidebar-expanded .sidebar { padding-left:calc(6px + env(safe-area-inset-left)) !important; padding-right:calc(6px + env(safe-area-inset-right)) !important; }
  .modal-backdrop { box-sizing:border-box; padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left)) !important; }
  .capture-detail-modal.capture-frame-popup, .capture-detail-modal.truck-detail-modal { max-height:min(850px,calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important; }
+}
+
+/* Hover drawer: reveal a fixed layout instead of resizing the live dashboard. */
+@media (min-width:1201px) {
+  .shell {
+    --sidebar-content-width: calc(var(--sidebar-expanded-width) - 24px);
+    --sidebar-reveal-duration: 220ms;
+    --sidebar-reveal-easing: cubic-bezier(.22, .8, .24, 1);
+  }
+  .shell .sidebar,
+  .shell.sidebar-expanded .sidebar {
+    width: var(--sidebar-expanded-width) !important;
+    min-width: var(--sidebar-expanded-width) !important;
+    max-width: var(--sidebar-expanded-width) !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    border-right: 0 !important;
+    box-shadow: none !important;
+    clip-path: inset(0 calc(var(--sidebar-expanded-width) - var(--sidebar-collapsed-width)) 0 0);
+    transition: clip-path var(--sidebar-reveal-duration) var(--sidebar-reveal-easing) !important;
+    will-change: clip-path;
+  }
+  .shell.sidebar-expanded .sidebar { clip-path: inset(0 0 0 0); }
+  .shell .sidebar::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--sidebar-collapsed-width) - 1px);
+    width: 1px;
+    background: rgba(56, 189, 248, .22);
+    pointer-events: none;
+    transition: transform var(--sidebar-reveal-duration) var(--sidebar-reveal-easing);
+  }
+  .shell.sidebar-expanded .sidebar::after { transform: translateX(calc(var(--sidebar-expanded-width) - var(--sidebar-collapsed-width))); }
+  .shell > main,
+  .shell.sidebar-expanded > main {
+    margin-left: var(--sidebar-collapsed-width) !important;
+    width: calc(100% - var(--sidebar-collapsed-width)) !important;
+    transition: none !important;
+  }
+  .shell .sidebar .brand,
+  .shell .sidebar .sidebarNav,
+  .shell .sidebar .sidebarFooter,
+  .shell .sidebar .sidebarWatermarkWrap { width: var(--sidebar-content-width) !important; flex-shrink: 0; }
+  .shell .sidebar .brandMark { margin: 0 !important; transition: border-color 160ms ease, box-shadow 160ms ease !important; }
+  .shell .sidebar .sidebarNavBtn,
+  .shell .sidebar .sidebarLogout,
+  .shell .sidebar .sidebarUserCard,
+  .shell .sidebar .powered-watermark {
+    width: var(--sidebar-content-width) !important;
+    min-width: var(--sidebar-content-width) !important;
+    justify-content: flex-start !important;
+    box-sizing: border-box !important;
+    clip-path: inset(0 calc(var(--sidebar-content-width) - 44px) 0 0 round 10px);
+    transition: clip-path var(--sidebar-reveal-duration) var(--sidebar-reveal-easing),
+                background-color 160ms ease, border-color 160ms ease, color 160ms ease !important;
+    transform: none !important;
+    will-change: clip-path;
+  }
+  .shell .sidebar .sidebarNavBtn,
+  .shell .sidebar .sidebarLogout { margin: 0 !important; padding: 0 10px 0 0 !important; gap: 10px !important; }
+  .shell .sidebar .sidebarNavBtn .navIconBox,
+  .shell .sidebar .sidebarLogout .navIconBox { width: 42px !important; min-width: 42px !important; }
+  .shell .sidebar .sidebarUserCard { height: 44px !important; min-height: 44px !important; margin: 8px 0 !important; padding: 5px !important; gap: 10px !important; }
+  .shell .sidebar .sidebarWatermarkWrap { margin: 0 !important; transition: none !important; }
+  .shell .sidebar .powered-watermark { margin: 0 !important; height: 36px !important; min-height: 36px !important; padding: 0 6px !important; gap: 8px !important; }
+  .shell.sidebar-expanded .sidebar .sidebarNavBtn,
+  .shell.sidebar-expanded .sidebar .sidebarLogout,
+  .shell.sidebar-expanded .sidebar .sidebarUserCard,
+  .shell.sidebar-expanded .sidebar .powered-watermark { clip-path: inset(0 0 0 0 round 10px); }
+  .shell .sidebar .brandText,
+  .shell .sidebar .navLabel,
+  .shell .sidebar .sidebarUserMeta,
+  .shell .sidebar .powered-watermark__text {
+    width: auto !important;
+    min-width: 0 !important;
+    flex: 1;
+    visibility: visible !important;
+    /* Keep text painted throughout both directions; the panel reveals it. */
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .shell .sidebar .sidebarUserMeta { display: flex !important; }
+  .shell .sidebar .powered-watermark__text { display: inline-block !important; }
+  .shell .sidebar .navLabel { text-align: left !important; }
+  .shell .sidebar .sidebarMenuLabel {
+    width: var(--sidebar-content-width) !important;
+    opacity: .85 !important;
+    visibility: visible !important;
+    clip-path: inset(0 100% 0 0);
+    transition: clip-path var(--sidebar-reveal-duration) var(--sidebar-reveal-easing) !important;
+  }
+  .shell.sidebar-expanded .sidebar .sidebarMenuLabel { clip-path: inset(0); }
+  .shell .sidebar .sidebarNavBtn:hover,
+  .shell .sidebar .sidebarUserCard:hover,
+  .shell .sidebar .brandMark:hover { transform: none !important; }
+  .shell .sidebar .sidebarNavBtn:focus-visible,
+  .shell .sidebar .sidebarLogout:focus-visible { outline-offset: -3px; }
+}
+@media (min-width:1201px) and (prefers-reduced-motion:reduce) {
+  .shell .sidebar, .shell .sidebar::after, .shell .sidebar * { transition: none !important; }
 }

@@ -1,5 +1,5 @@
-import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen, PanelLeftOpen, PanelLeftClose } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "./store";
 import { LoginPage } from "./components/LoginPage";
 import { DashboardPage } from "./components/DashboardPage";
@@ -25,23 +25,35 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
-  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const sidebarSuppressedRef = useRef(false);
   const { session, refresh, logout, validateSession } = useAppStore();
   const permissions = session?.user.permissions ?? [];
 
-  useEffect(() => { setSidebarExpanded(false); }, [session?.token]);
+  const closeSidebar = useCallback(() => {
+    setSidebarExpanded(false);
+  }, []);
+
+  const openSidebarFromPointer = (clientX: number) => {
+    if (sidebarExpanded || sidebarSuppressedRef.current || window.innerWidth <= 1200) return;
+    const sidebar = sidebarRef.current;
+    if (!sidebar) return;
+    const collapsedWidth = parseFloat(getComputedStyle(sidebar).getPropertyValue("--sidebar-collapsed-width")) || 68;
+    // Only the actual collapsed strip can activate the menu, including while it is shrinking.
+    if (clientX < sidebar.getBoundingClientRect().left + collapsedWidth) setSidebarExpanded(true);
+  };
+
+  useEffect(() => { closeSidebar(); }, [session?.token, closeSidebar]);
 
   useEffect(() => {
-    if (!sidebarExpanded) return;
     const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !sidebarRef.current?.contains(event.target)) setSidebarExpanded(false);
+      if (event.target instanceof Node && !sidebarRef.current?.contains(event.target)) closeSidebar();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      setSidebarExpanded(false);
-      sidebarToggleRef.current?.focus();
+      sidebarSuppressedRef.current = true;
+      closeSidebar();
     };
-    const closeOnWindowBlur = () => setSidebarExpanded(false);
+    const closeOnWindowBlur = () => closeSidebar();
     document.addEventListener("pointerdown", closeOutside, true);
     document.addEventListener("keydown", closeOnEscape);
     window.addEventListener("blur", closeOnWindowBlur);
@@ -50,7 +62,7 @@ export default function App() {
       document.removeEventListener("keydown", closeOnEscape);
       window.removeEventListener("blur", closeOnWindowBlur);
     };
-  }, [sidebarExpanded]);
+  }, [closeSidebar]);
 
   useEffect(() => { if (session) validateSession(); }, [session?.token, validateSession]);
 
@@ -103,12 +115,29 @@ export default function App() {
         className="sidebar"
         ref={sidebarRef}
         aria-label="Menu utama"
+        onPointerEnter={(event) => {
+          if (event.pointerType === "touch") return;
+          sidebarSuppressedRef.current = false;
+          openSidebarFromPointer(event.clientX);
+        }}
+        onPointerMove={(event) => {
+          if (event.pointerType === "touch") return;
+          openSidebarFromPointer(event.clientX);
+        }}
         onPointerLeave={(event) => {
-          if (event.pointerType !== "touch") setSidebarExpanded(false);
+          if (event.pointerType === "touch") return;
+          sidebarSuppressedRef.current = false;
+          closeSidebar();
+        }}
+        onFocus={(event) => {
+          if (event.target.matches(":focus-visible") && window.innerWidth > 1200) {
+            sidebarSuppressedRef.current = false;
+            setSidebarExpanded(true);
+          }
         }}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-            setSidebarExpanded(false);
+            closeSidebar();
           }
         }}
       >
@@ -128,15 +157,6 @@ export default function App() {
           </div>
         </div>
 
-        <button type="button" className="sidebarToggle" ref={sidebarToggleRef}
-          aria-expanded={sidebarExpanded} aria-controls="sidebar-navigation"
-          aria-label={sidebarExpanded ? "Tutup menu" : "Buka menu"}
-          title={sidebarExpanded ? "Tutup menu" : "Buka menu"}
-          onClick={() => setSidebarExpanded(value => !value)}>
-          {sidebarExpanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
-          <span className="sidebarToggleLabel">Tutup menu</span>
-        </button>
-
         <div className="sidebarMenuLabel">SISTEM KENDALI MUTU</div>
 
         <nav className="sidebarNav" id="sidebar-navigation" aria-label="Navigasi halaman">
@@ -150,7 +170,7 @@ export default function App() {
               <button 
                 key={item.id} 
                 className={`sidebarNavBtn ${isActive ? "active" : ""}`} 
-                onClick={() => { setTab(item.id); setSidebarExpanded(false); }}
+                onClick={() => { setTab(item.id); sidebarSuppressedRef.current = true; closeSidebar(); }}
                 data-tooltip={item.label} 
                 title={item.label}
                 aria-label={item.label}
