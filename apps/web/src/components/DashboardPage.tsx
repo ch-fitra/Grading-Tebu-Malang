@@ -1,5 +1,6 @@
 import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
+import { findFactoryCamera } from "../utils/stations";
 import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
@@ -43,7 +44,6 @@ interface FactoryDefinition {
     line: number;
     title: string;
     subtext: string;
-    cameraId?: number;
     locked?: boolean;
   }[];
 }
@@ -60,7 +60,7 @@ const FACTORIES: Record<FactoryKey, FactoryDefinition> = {
       { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", locked: true },
       { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", locked: true },
       { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", locked: true },
-      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5 (Wisenet)", cameraId: 1, locked: false },
+      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5 (Wisenet)", locked: false },
     ]
   },
   kebonagung: {
@@ -70,11 +70,11 @@ const FACTORIES: Record<FactoryKey, FactoryDefinition> = {
     city: "Malang, Jawa Timur",
     shortName: "PG Kebon Agung",
     lines: [
-      { line: 1, title: "MBS 1", subtext: "Meja Tebu 1 (Utama)", cameraId: 1, locked: false },
-      { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", cameraId: undefined, locked: false },
-      { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", cameraId: undefined, locked: false },
-      { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", cameraId: undefined, locked: false },
-      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5", cameraId: undefined, locked: false },
+      { line: 1, title: "MBS 1", subtext: "Meja Tebu 1 (Utama)", locked: false },
+      { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", locked: false },
+      { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", locked: false },
+      { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", locked: false },
+      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5", locked: false },
     ]
   }
 };
@@ -114,7 +114,7 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
 import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
-  const { latest, status, refresh, history, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
+  const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
   const [modelFrames, setModelFrames] = useState<InferenceResult[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -276,7 +276,13 @@ export function DashboardPage() {
     }
   };
 
-  const currentFactory = FACTORIES[activeFactory];
+  const currentFactory = useMemo(() => ({
+    ...FACTORIES[activeFactory],
+    lines: FACTORIES[activeFactory].lines.map(line => ({
+      ...line,
+      cameraId: line.locked ? undefined : findFactoryCamera(cameras, activeFactory, line.line)?.id,
+    })),
+  }), [activeFactory, cameras]);
   const currentLineDef = currentFactory.lines.find((l) => l.line === activeLine);
   const targetCameraId = currentLineDef?.cameraId;
   autoCameraRef.current = targetCameraId;

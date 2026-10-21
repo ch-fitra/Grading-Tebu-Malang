@@ -8,6 +8,25 @@ export interface MbsStationInfo {
   cameraId?: number;
 }
 
+export function findFactoryCamera(
+  cameras: CameraRow[],
+  factory: "trangkil" | "kebonagung",
+  station: number,
+): CameraRow | undefined {
+  const matches = cameras.filter(camera => {
+    const text = `${camera.name} ${camera.location}`.toLowerCase();
+    const trangkil = text.includes("trangkil");
+    const kebonagung = text.includes("kebon agung") || text.includes("malang");
+    if (factory === "trangkil" ? !trangkil || kebonagung : !kebonagung || trangkil) return false;
+    const namedStation = camera.name.match(/\bMBS\s*(\d+)\b/i)
+      ?? camera.name.match(/\bmeja(?:\s+tebu)?\s*(\d+)\b/i);
+    const cameraStation = namedStation ? Number(namedStation[1]) : factory === "trangkil" ? 5 : 1;
+    return cameraStation === station;
+  });
+  // An absent or ambiguous station must not select an unrelated camera ID.
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function resolveMbsStation(idOrLine?: number, cameras?: CameraRow[]): MbsStationInfo {
   if (!idOrLine) {
     return { mbsNum: 5, label: "MBS 5", subLabel: "Wisenet (Utama)", isPrimaryLive: true, cameraId: 2 };
