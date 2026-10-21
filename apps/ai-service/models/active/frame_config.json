@@ -1,0 +1,11 @@
+{
+  "name": "Sugarcane Full Frame Detector",
+  "version": "1.0.0",
+  "type": "classification",
+  "input_size": 224,
+  "classes": ["full_frame_sugarcane", "not_full_frame"],
+  "threshold": 0.8,
+  "output_activation": "softmax",
+  "input_color": "rgb",
+  "model_path": "models/active/model_frame_sugarcane.keras"
+}

@@ -37,10 +37,16 @@ import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
 import { TRANGKIL_GRADES, type TrangkilGradeCode } from "../utils/grade-guide";
-import { backendUrl } from "../utils/api";
+import { aiApi, backendUrl } from "../utils/api";
 import type { TruckInspectionSession, InferenceResult, Grade } from "../types";
 
 import { resolveMbsStation } from "../utils/stations";
+
+type HistorySummary = {
+  total_captures: number;
+  average_confidence: number | null;
+  average_impurity: number | null;
+};
 
 function normalizeGrade(g?: string): string {
   if (!g) return "M";
@@ -164,6 +170,51 @@ export function HistoryPage() {
   const allowedCameraIds = new Set(visibleCameras.map(c => c.id));
   const visibleHistory = history.filter(h => !userFactory || allowedCameraIds.has(h.cameraId));
   const visibleTrucks = truckSessions.filter(t => !userFactory || allowedCameraIds.has(t.line));
+  const summaryCameraScope = visibleCameras
+    .filter(camera => selectedLineFilter === "all" || resolveMbsStation(camera.id, cameras).mbsNum === selectedLineFilter)
+    .map(camera => camera.id).sort((a, b) => a - b).join(",");
+  const [captureSummary, setCaptureSummary] = useState<HistorySummary | null>(null);
+  const [summaryUnavailable, setSummaryUnavailable] = useState(false);
+
+  useEffect(() => {
+    setCaptureSummary(null);
+    setSummaryUnavailable(false);
+    if (!session || !summaryCameraScope) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
+    const loadSummary = async () => {
+      const params = new URLSearchParams();
+      for (const id of summaryCameraScope.split(",")) params.append("camera_ids", id);
+      const now = new Date();
+      if (selectedDateFilter === "today") {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+        params.set("start_at", start.toISOString());
+        params.set("end_at", end.toISOString());
+      } else if (selectedDateFilter !== "all") {
+        const days = selectedDateFilter === "7d" ? 7 : 30;
+        params.set("start_at", new Date(now.getTime() - days * 86400000).toISOString());
+      }
+      if (searchQuery.trim()) params.set("search", searchQuery.trim().slice(0, 500));
+      try {
+        const summary = await aiApi<HistorySummary>(`/inference/history-summary?${params}`, {
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])
+        });
+        if (!cancelled) {
+          setCaptureSummary(summary);
+          setSummaryUnavailable(false);
+        }
+      } catch {
+        if (!cancelled) setSummaryUnavailable(true);
+      } finally {
+        if (!cancelled) timer = setTimeout(loadSummary, 3000);
+      }
+    };
+    // Debounce typing and keep aggregate requests independent of the preview limit.
+    timer = setTimeout(loadSummary, 200);
+    return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
+  }, [session?.token, summaryCameraScope, selectedDateFilter, searchQuery]);
 
   // Close modals on Escape key press
   useEffect(() => {
@@ -254,18 +305,14 @@ export function HistoryPage() {
   const pagedCaptures = filteredHistory.slice(historyPageStart, historyPageStart + historyPageSize);
   const totalCyclesCount = filteredTrucks.length;
   const completedCyclesCount = filteredTrucks.filter(t => t.status === "completed").length;
-  const totalCapturesCount = filteredHistory.length;
+  const totalCapturesCount = captureSummary?.total_captures;
 
-  const averageConfidence = filteredHistory.length > 0
-    ? `${Math.round((filteredHistory.reduce((sum, row) => sum + (row.confidence ?? 0), 0) / filteredHistory.length) * 100)}%`
-    : filteredTrucks.length > 0
-    ? `${Math.round((filteredTrucks.reduce((sum, row) => sum + (row.averageConfidence ?? 0), 0) / filteredTrucks.length) * 100)}%`
+  const averageConfidence = captureSummary?.average_confidence != null
+    ? `${Math.round(captureSummary.average_confidence * 100)}%`
     : "—";
 
-  const averageImpurity = filteredHistory.length > 0
-    ? `${(filteredHistory.reduce((sum, row) => sum + (row.classes.daun + row.classes.pucuk + row.classes.sampah), 0) / filteredHistory.length).toFixed(1)}%`
-    : filteredTrucks.length > 0
-    ? `${(filteredTrucks.reduce((sum, row) => sum + (row.averageImpurity || 0), 0) / filteredTrucks.length).toFixed(1)}%`
+  const averageImpurity = captureSummary?.average_impurity != null
+    ? `${captureSummary.average_impurity.toFixed(1)}%`
     : "—";
 
   const hasActiveFilters = Boolean(
@@ -544,8 +591,8 @@ export function HistoryPage() {
 
           <div className="historyKpiCard">
             <span className="historyKpiLabel">TOTAL TANGKAPAN FRAME AI</span>
-            <strong className="historyKpiValue cyan">
-              {totalCapturesCount}
+            <strong className="historyKpiValue cyan" title={summaryUnavailable ? "Total frame belum berhasil diperbarui" : undefined}>
+              {totalCapturesCount?.toLocaleString("id-ID") ?? "—"}
               <span className="historyKpiUnit">Frame</span>
             </strong>
             <span className="historyKpiSub">

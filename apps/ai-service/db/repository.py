@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import closing
 from typing import Dict, Any, Optional, List
 from db.connection import get_ai_db_connection, get_auth_db_connection
 from psycopg2.extras import RealDictCursor
@@ -12,7 +13,95 @@ logger = logging.getLogger("ai_repository")
 class AIRepository:
     """Data Access Layer for AI Service operating on sugarcane_ai DB and reading sugarcane Auth DB."""
 
+    @staticmethod
+    def history_summary(camera_ids: List[int], start_at=None, end_at=None, search: str = "") -> Dict[str, Any]:
+        """Aggregate ALL saved history, independently of the API's 1,000-row preview."""
+        if not camera_ids:
+            return {"total_captures": 0, "average_confidence": None, "average_impurity": None}
+        conditions = ["i.camera_id = ANY(%s)"]
+        params = [camera_ids]
+        if start_at is not None:
+            conditions.append("i.created_at >= %s")
+            params.append(start_at)
+        if end_at is not None:
+            conditions.append("i.created_at < %s")
+            params.append(end_at)
+        if search:
+            pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            conditions.append("""(
+                concat_ws(' ', i.id, i.grade, i.created_at, c.name) ILIKE %s
+                OR EXISTS (
+                    SELECT 1 FROM truck_inspection_captures tc
+                    JOIN truck_inspections t ON t.id = tc.inspection_id
+                    WHERE tc.inference_id = i.id
+                      AND concat_ws(' ', t.truck_code, t.plate_number, t.driver_name) ILIKE %s
+                )
+            )""")
+            params.extend([pattern, pattern])
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT COUNT(*) AS total_captures,
+                           AVG(i.confidence) AS average_confidence,
+                           AVG(i.daun_percent + i.pucuk_percent + i.sampah_percent) AS average_impurity
+                    FROM inference_results i
+                    LEFT JOIN cameras c ON c.id = i.camera_id
+                    WHERE """ + " AND ".join(conditions), params)
+                row = cursor.fetchone()
+                return {"total_captures": int(row["total_captures"]),
+                        "average_confidence": float(row["average_confidence"]) if row["average_confidence"] is not None else None,
+                        "average_impurity": float(row["average_impurity"]) if row["average_impurity"] is not None else None}
+
     # --- Auth & User Validation (from DB: sugarcane) ---
+    @staticmethod
+    def history_page(camera_id: int, page: int = 1, page_size: int = 10, cycle_code: Optional[str] = None) -> Dict[str, Any]:
+        """Read one page from the full history; totals never use a preview array."""
+        conditions = ["i.camera_id = %s"]
+        params = [camera_id]
+        if cycle_code:
+            conditions.append("""EXISTS (
+                SELECT 1 FROM truck_inspections t WHERE t.id = %s AND t.line = i.camera_id
+                AND (EXISTS (SELECT 1 FROM truck_inspection_captures tc WHERE tc.inspection_id = t.id AND tc.inference_id = i.id)
+                     OR (i.created_at >= t.started_at AND i.created_at <= COALESCE(t.completed_at, NOW())))
+            )""")
+            params.append(cycle_code)
+        where = " AND ".join(conditions)
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT COUNT(*) AS total FROM inference_results i WHERE " + where, params)
+                total = int(cursor.fetchone()["total"])
+                pages = max(1, (total + page_size - 1) // page_size)
+                page = min(max(1, page), pages)
+                cursor.execute("""
+                    SELECT i.*, CASE WHEN links.cycle IS NULL THEN 1 ELSE
+                        ROW_NUMBER() OVER (PARTITION BY links.cycle ORDER BY i.created_at, i.id) END AS frame_number
+                    FROM inference_results i
+                    LEFT JOIN (SELECT inference_id, MIN(inspection_id::text) AS cycle
+                               FROM truck_inspection_captures GROUP BY inference_id) links ON links.inference_id = i.id
+                    WHERE """ + where + " ORDER BY i.created_at DESC, i.id DESC LIMIT %s OFFSET %s",
+                    [*params, page_size, (page - 1) * page_size])
+                items = [{
+                    "id": int(row["id"]), "cameraId": int(row["camera_id"]),
+                    "timestamp": row["created_at"].isoformat(), "grade": row["grade"],
+                    "classes": {"daun": float(row["daun_percent"]), "pucuk": float(row["pucuk_percent"]), "sampah": float(row["sampah_percent"])},
+                    "confidence": float(row["confidence"]), "snapshot": row["snapshot_path"],
+                    "frameNumber": int(row["frame_number"]),
+                } for row in cursor.fetchall()]
+        # Preserve the actual model class/scores for older captures, just as the existing API does.
+        paths = [item["snapshot"].lstrip("/") for item in items if item["snapshot"]]
+        if paths:
+            with closing(get_ai_db_connection()) as conn, conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute("""SELECT DISTINCT ON (snapshot_path) snapshot_path,detected_class,classes_score
+                        FROM ai_inference_results WHERE snapshot_path = ANY(%s) ORDER BY snapshot_path,id DESC""", (paths,))
+                    detections = {row["snapshot_path"]: row for row in cursor.fetchall()}
+            for item in items:
+                detection = detections.get((item["snapshot"] or "").lstrip("/"))
+                if detection and detection["detected_class"] in ("S", "M", "A", "D", "B", "T", "G", "X"):
+                    item["grade"] = detection["detected_class"]
+                    item["classScores"] = detection["classes_score"]
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
+
     @staticmethod
     def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
         try:
@@ -65,6 +154,61 @@ class AIRepository:
             return False
 
     # --- Cycle Scanning Management (to DB: sugarcane_ai) ---
+    @staticmethod
+    def create_auto_inspection(camera_id: int, cycle_code: str):
+        """Use the existing dashboard inspection schema without changing the API service."""
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM truck_inspections WHERE line = %s AND status = 'active'", (camera_id,))
+                if cursor.fetchone():
+                    raise RuntimeError("Masih ada siklus aktif pada kamera ini")
+                cursor.execute("""
+                    INSERT INTO truck_inspections (id, truck_code, line, status, notes)
+                    VALUES (%s, %s, %s, 'active', %s)
+                """, (cycle_code, "Siklus Auto " + cycle_code[:8], camera_id,
+                      "[AUTO_FRAME] Full frame 3 detik; grading maksimum 30 detik"))
+
+    @staticmethod
+    def has_running_cycle(camera_id: int) -> bool:
+        with closing(get_ai_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM ai_results WHERE camera_id = %s AND status = 'running' LIMIT 1", (camera_id,))
+                return cursor.fetchone() is not None
+
+    @staticmethod
+    def has_active_inspection(camera_id: int) -> bool:
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM truck_inspections WHERE line = %s AND status = 'active' LIMIT 1", (camera_id,))
+                return cursor.fetchone() is not None
+
+    @staticmethod
+    def discard_auto_inspection(cycle_code: str):
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM truck_inspections WHERE id = %s AND notes LIKE '[AUTO_FRAME]%%'", (cycle_code,))
+
+    @staticmethod
+    def complete_auto_inspection(cycle_code: str, summary: Dict[str, Any]):
+        grade = summary.get("majority_class")
+        decision = ("MBS" if grade in ("S", "M", "A") else "NON_MBS" if grade in ("D", "B")
+                    else "DITOLAK_DO" if grade in ("G", "X") else "PENDING")
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE truck_inspections SET status = 'completed', completed_at = COALESCE(completed_at, NOW()),
+                        final_decision = %s, average_impurity = %s, average_confidence = %s
+                    WHERE id = %s AND notes LIKE '[AUTO_FRAME]%%'
+                """, (decision, summary.get("avg_total_impurity") or 0,
+                      summary.get("confidence_avg") or 0, cycle_code))
+
+    @staticmethod
+    def unfinished_auto_inspections() -> List[str]:
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM truck_inspections WHERE status = 'active' AND notes LIKE '[AUTO_FRAME]%%'")
+                return [str(row[0]) for row in cursor.fetchall()]
+
     @staticmethod
     def start_cycle(camera_id: int, model_version: str, cycle_code: Optional[str] = None) -> Dict[str, Any]:
         from datetime import datetime, timezone
@@ -125,7 +269,7 @@ class AIRepository:
                     if not agg or agg["total_frames"] == 0:
                         cursor.execute("""
                             UPDATE ai_results
-                            SET status = 'completed', end_time = NOW()
+                            SET status = 'completed', end_time = COALESCE(end_time, NOW())
                             WHERE cycle_code = %s
                             RETURNING *;
                         """, (cycle_code,))
@@ -133,7 +277,7 @@ class AIRepository:
                         cursor.execute("""
                             UPDATE ai_results
                             SET status = 'completed',
-                                end_time = NOW(),
+                                end_time = COALESCE(end_time, NOW()),
                                 total_frames_scanned = %s,
                                 avg_total_impurity = ROUND(%s::numeric, 2),
                                 confidence_avg = ROUND(%s::numeric, 4),

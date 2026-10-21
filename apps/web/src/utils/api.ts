@@ -7,6 +7,21 @@ export class ApiError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
 }
 
+// Automatic cycles live in the AI service so they continue without an open dashboard.
+export const aiApi = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+  let token = "";
+  try { token = JSON.parse(localStorage.getItem("tebu-session") ?? "null")?.token ?? ""; } catch { /* invalid cached session */ }
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  if (init?.body) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${aiServiceUrl}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new ApiError(typeof payload?.detail === "string" ? payload.detail : `AI service gagal (${response.status})`, response.status);
+  }
+  return response.json();
+};
+
 export function getCameraStreamUrl(cameraId: number, overlay: boolean = true, quality: number = 80, key?: number | string): string {
   return `${backendUrl}/api/cameras/${cameraId}/stream?overlay=${overlay ? "true" : "false"}&quality=${quality}${key ? `&t=${key}` : ""}`;
 }

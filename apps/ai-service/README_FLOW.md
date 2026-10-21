@@ -3,6 +3,9 @@
 
 Dokumen ini berisi spesifikasi teknis mendalam mengenai **AI Service Engine** (`apps/ai-service`) dan **Database Mandiri** (`sugarcane_ai`). Dokumentasi ini mencakup skema database, relasi antar-tabel, definisi kolom, konsep arsitektur, flow eksekusi thread, hingga matematika inferensi model.
 
+Pembaruan mode Auto (full frame 3 detik → grading 30 detik), konfigurasi, endpoint,
+dan panduan pengoperasian tersedia di [AUTO_CYCLE.md](AUTO_CYCLE.md).
+
 ---
 
 ## 🏗️ 1. Konsep Dasar & Arsitektur Mandiri

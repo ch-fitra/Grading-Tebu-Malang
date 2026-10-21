@@ -4,6 +4,9 @@ import asyncio
 import os
 import logging
 import threading
+import json
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from contextlib import asynccontextmanager
 import time
 from datetime import datetime, timezone
@@ -24,7 +27,7 @@ logger = logging.getLogger("ai_service")
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -39,6 +42,7 @@ from streamer import (
 
 from db.migrations import run_ai_migrations
 from db.repository import AIRepository
+from auto_cycle import AutoCycleController
 
 try:
     import onnxruntime as ort
@@ -77,8 +81,24 @@ async def lifespan(app: FastAPI):
         stream_manager.get_or_create(1, DEFAULT_TRANGKIL_WISENET_RTSP, "MBS 5 - PT Trangkil (Wisenet Meja 5)")
 
     try:
+        # A service restart never leaves an automatic dashboard cycle marked active.
+        try:
+            for code in AIRepository.unfinished_auto_inspections():
+                summary = AIRepository.stop_cycle(code)
+                if summary:
+                    AIRepository.complete_auto_inspection(code, summary)
+        except Exception:
+            logger.exception("Could not recover interrupted automatic cycles; Auto will require database availability")
         yield
     finally:
+        for controller in list(_auto_controllers.values()):
+            try:
+                controller.shutdown()
+            except Exception:
+                logger.exception("Could not finalize automatic cycle during shutdown")
+        for event, thread in list(_active_cycle_workers.values()):
+            event.set()
+            thread.join(timeout=30)
         stream_manager.stop_all()
 
 app = FastAPI(title="Tebu AI Service", version="0.2.0", lifespan=lifespan)
@@ -146,6 +166,8 @@ DEFAULT_TRANGKIL_WISENET_RTSP = os.getenv("CCTV_TRANGKIL_RTSP_URL", "")
 _session_lock = threading.Lock()
 _session_key = None
 _session = None
+_sessions = {}
+_inference_lock = threading.RLock()
 
 
 def configured_model_path(config: ModelConfig) -> Path:
@@ -162,7 +184,7 @@ def model_session(config: ModelConfig):
         raise HTTPException(status_code=503, detail="File model belum tersedia")
     key = (str(path), path.stat().st_mtime_ns)
     with _session_lock:
-        if _session_key != key:
+        if key not in _sessions:
             if path.suffix.lower() in [".keras", ".h5"]:
                 import keras
                 candidate = keras.models.load_model(str(path), compile=False)
@@ -170,8 +192,13 @@ def model_session(config: ModelConfig):
                 if ort is None:
                     raise HTTPException(status_code=503, detail="onnxruntime belum terpasang")
                 candidate = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
-            _session = candidate
-            _session_key = key
+            # Keep frame and grading models resident independently.
+            for old_key in list(_sessions):
+                if old_key[0] == str(path):
+                    del _sessions[old_key]
+            _sessions[key] = candidate
+        _session = _sessions[key]
+        _session_key = key
         return _session
 
 
@@ -240,6 +267,11 @@ def segmentation_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[D
 
 
 def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
+    with _inference_lock:
+        return _run_model_inference(image, config)
+
+
+def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
     path = configured_model_path(config)
     
     # If model is .keras / .h5, handle via Keras runner
@@ -286,11 +318,11 @@ def health():
     return {
         "status": "ok",
         "service": "ai-service",
-        "capabilities": {"conveyor_empty": False},
+        "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file()},
         "model": {
             "name": config.name,
             "version": config.version,
-            "available": configured_model_path(config).is_file() and ort is not None,
+            "available": configured_model_path(config).is_file() and (configured_model_path(config).suffix.lower() in (".keras", ".h5") or ort is not None),
         },
         "camera_1_live": s1.is_connected if s1 else False,
         "camera_1_fps": round(s1.fps, 1) if s1 else 0.0,
@@ -396,6 +428,154 @@ def register_camera(payload: CameraRegisterPayload):
 
 _active_cycle_workers: Dict[str, Tuple[threading.Event, threading.Thread]] = {}
 _workers_lock = threading.Lock()
+_lifecycle_lock = threading.RLock()
+_auto_controllers: Dict[int, AutoCycleController] = {}
+_controllers_lock = threading.Lock()
+_automatic_cycle_codes = set()
+FRAME_CONFIG_PATH = MODEL_DIR / "frame_config.json"
+
+
+class AutoModeRequest(BaseModel):
+    enabled: bool
+
+
+def load_frame_config() -> ModelConfig:
+    return ModelConfig.model_validate_json(FRAME_CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def _authorized_cameras(authorization: Optional[str], permission: Optional[str] = None, operator_only: bool = False):
+    """Reuse the API's session and factory access checks; never trust UI permissions."""
+    base = os.getenv("AUTO_CYCLE_API_URL", f"http://127.0.0.1:{os.getenv('API_PORT', os.getenv('BACKEND_PORT', '4110'))}").rstrip("/")
+    try:
+        def read(path):
+            request = Request(base + path, headers={"Authorization": authorization or ""})
+            with urlopen(request, timeout=5) as response:
+                return json.load(response)
+        user = read("/api/auth/me")
+        # /auth/me returns the public user directly.
+        if (permission and permission not in user.get("permissions", [])) or (operator_only and user.get("role") == "admin"):
+            raise HTTPException(status_code=403, detail="Akses ditolak")
+        return read("/api/cameras")
+    except HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail="Sesi atau akses kamera tidak valid") from exc
+    except (URLError, TimeoutError) as exc:
+        raise HTTPException(status_code=503, detail="API autentikasi tidak tersedia") from exc
+
+
+def _authorize_auto(camera_id: int, authorization: Optional[str], write: bool = False):
+    cameras = _authorized_cameras(authorization, "inspection.write" if write else None, operator_only=write)
+    if not any(camera["id"] == camera_id for camera in cameras):
+        raise HTTPException(status_code=403, detail="Kamera berada di luar akses pabrik")
+
+
+@app.get("/inference/history-summary")
+def history_summary(
+    authorization: Optional[str] = Header(None),
+    camera_ids: Optional[List[int]] = Query(None),
+    start_at: Optional[datetime] = Query(None),
+    end_at: Optional[datetime] = Query(None),
+    search: str = Query("", max_length=500),
+):
+    permitted = {camera["id"] for camera in _authorized_cameras(authorization, "history.read")}
+    requested = set(camera_ids) if camera_ids is not None else permitted
+    if not requested.issubset(permitted):
+        raise HTTPException(status_code=403, detail="Kamera berada di luar akses pabrik")
+    if start_at is not None and end_at is not None and start_at >= end_at:
+        raise HTTPException(status_code=422, detail="Rentang waktu tidak valid")
+    return AIRepository.history_summary(sorted(requested), start_at, end_at, search.strip())
+
+
+@app.get("/inference/history-page")
+def history_page(
+    camera_id: int = Query(..., gt=0),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    cycle_code: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    cameras = _authorized_cameras(authorization, "dashboard.read")
+    if camera_id not in {camera["id"] for camera in cameras}:
+        raise HTTPException(status_code=403, detail="Kamera berada di luar akses pabrik")
+    if cycle_code:
+        from uuid import UUID
+        try:
+            cycle_code = str(UUID(cycle_code))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="ID siklus tidak valid") from exc
+    return AIRepository.history_page(camera_id, page, page_size, cycle_code)
+
+
+def _sample_full_frame(camera_id, previous_id):
+    stream = stream_manager.get_stream(camera_id)
+    if not stream or not stream.is_connected:
+        return None, None, None
+    # Copy the original camera image and identity under the same lock, WITHOUT ROI/HUD.
+    with stream.raw_lock:
+        frame_id = (id(stream), stream.raw_frame_id)
+        if frame_id == previous_id or stream.latest_raw_frame is None or time.time() - stream.last_frame_time > 1.5:
+            return frame_id, None, None
+        image = stream.latest_raw_frame.copy()
+    config = load_frame_config()
+    classes, confidence = run_onnx_inference(image, config)
+    if not np.isfinite(list(classes.values())).all():
+        raise RuntimeError("Output model full frame tidak valid")
+    if confidence < config.threshold:
+        return frame_id, None, confidence
+    return frame_id, classes["full_frame_sugarcane"] > classes["not_full_frame"], confidence
+
+
+def _start_automatic_cycle(camera_id):
+    with _lifecycle_lock:
+        if AIRepository.has_running_cycle(camera_id) or AIRepository.has_active_inspection(camera_id):
+            raise RuntimeError("Tunggu siklus aktif selesai sebelum memulai siklus otomatis")
+        code = str(uuid4())
+        AIRepository.create_auto_inspection(camera_id, code)
+        try:
+            result, deadline = _begin_cycle(StartCycleRequest(camera_id=camera_id, cycle_code=code), duration=30.0, warm=False)
+        except Exception:
+            AIRepository.discard_auto_inspection(code)
+            raise
+        _automatic_cycle_codes.add(code)
+        return result["cycle_code"], deadline
+
+
+def _finish_automatic_cycle(code):
+    summary = _stop_cycle(code)
+    AIRepository.complete_auto_inspection(code, summary)
+    _automatic_cycle_codes.discard(code)
+
+
+def _auto_controller(camera_id):
+    with _controllers_lock:
+        if camera_id not in _auto_controllers:
+            _auto_controllers[camera_id] = AutoCycleController(
+                camera_id, lambda previous: _sample_full_frame(camera_id, previous),
+                lambda: _start_automatic_cycle(camera_id), _finish_automatic_cycle)
+        return _auto_controllers[camera_id]
+
+
+@app.get("/cycle/auto/{camera_id}")
+def get_auto_mode(camera_id: int, authorization: Optional[str] = Header(None)):
+    _authorize_auto(camera_id, authorization)
+    return {**_auto_controller(camera_id).status(), "model_available": configured_model_path(load_frame_config()).is_file()}
+
+
+@app.put("/cycle/auto/{camera_id}")
+def set_auto_mode(camera_id: int, payload: AutoModeRequest, authorization: Optional[str] = Header(None)):
+    _authorize_auto(camera_id, authorization, write=True)
+    controller = _auto_controller(camera_id)
+    with controller.lock, _lifecycle_lock:
+        if payload.enabled and not controller.enabled:
+            if AIRepository.has_running_cycle(camera_id) or AIRepository.has_active_inspection(camera_id):
+                raise HTTPException(status_code=409, detail="Selesaikan siklus manual sebelum mengaktifkan Auto")
+            stream = stream_manager.get_stream(camera_id)
+            image = stream.get_raw_frame() if stream and stream.is_connected else None
+            if image is None:
+                raise HTTPException(status_code=503, detail="Kamera belum terhubung")
+            # Warm both models before the confirmation/capture clocks start.
+            run_onnx_inference(image, load_frame_config())
+            run_onnx_inference(image, load_config())
+        return {**controller.set_enabled(payload.enabled), "model_available": True}
 
 
 def _generate_synthetic_sugarcane_frame() -> np.ndarray:
@@ -416,12 +596,14 @@ def _generate_synthetic_sugarcane_frame() -> np.ndarray:
     return frame
 
 
-def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event):
+def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event, deadline: Optional[float] = None):
     logger.info(f"Started autonomous background cycle scan worker for {cycle_code} (camera #{camera_id})")
     frame_idx = 0
     next_capture = time.monotonic()
     while not stop_event.is_set():
         if stop_event.wait(max(0.0, next_capture - time.monotonic())):
+            break
+        if deadline is not None and time.monotonic() >= deadline:
             break
         next_capture += 1.0
         try:
@@ -445,7 +627,11 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             snapshot_path = cycle_folder / snapshot_filename
             rel_snapshot_path = f"storage/snapshots/{cycle_code}/{snapshot_filename}"
 
-            classes, confidence = run_onnx_inference(image, config)
+            # A frame queued behind another inference must not run after the deadline.
+            with _inference_lock:
+                if stop_event.is_set() or (deadline is not None and time.monotonic() >= deadline):
+                    break
+                classes, confidence = run_onnx_inference(image, config)
             if not cv2.imwrite(str(snapshot_path), image):
                 raise RuntimeError("Failed to persist cycle snapshot")
 
@@ -496,13 +682,25 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
 
 @app.post("/cycle/start")
 def start_cycle(payload: StartCycleRequest):
+    controller = _auto_controller(payload.camera_id)
+    with controller.lock, _lifecycle_lock:
+        if controller.enabled:
+            raise HTTPException(status_code=409, detail="Mode Auto aktif; kontrol manual dikunci")
+        result, _ = _begin_cycle(payload)
+        return {"status": "ok", "cycle": result}
+
+
+def _begin_cycle(payload: StartCycleRequest, duration: Optional[float] = None, warm: bool = True):
+    if AIRepository.has_running_cycle(payload.camera_id):
+        raise HTTPException(status_code=409, detail="Masih ada siklus aktif pada kamera ini")
     config = load_config()
     # Load/warm the model before starting the one-second acquisition clock.
     stream = stream_manager.get_stream(payload.camera_id)
     image = stream.get_raw_frame() if stream else None
     if image is None:
         raise HTTPException(status_code=503, detail="CCTV is not connected")
-    run_onnx_inference(image, config)
+    if warm:
+        run_onnx_inference(image, config)
     result = AIRepository.start_cycle(
         camera_id=payload.camera_id,
         model_version=config.version,
@@ -510,6 +708,7 @@ def start_cycle(payload: StartCycleRequest):
     )
     cycle_code = result["cycle_code"]
     cycle_id = result.get("id")
+    deadline = time.monotonic() + duration if duration is not None else None
 
     # Ensure cycle snapshot subfolder exists
     cycle_dir = SNAPSHOTS_DIR / cycle_code
@@ -522,30 +721,37 @@ def start_cycle(payload: StartCycleRequest):
         stop_event = threading.Event()
         thread = threading.Thread(
             target=_cycle_scan_worker,
-            args=(cycle_code, payload.camera_id, cycle_id, stop_event),
+            args=(cycle_code, payload.camera_id, cycle_id, stop_event, deadline),
             daemon=True,
             name=f"cycle-scan-{cycle_code}"
         )
         _active_cycle_workers[cycle_code] = (stop_event, thread)
         thread.start()
 
-    return {"status": "ok", "cycle": result}
+    return result, deadline
 
 
 @app.post("/cycle/stop")
 def stop_cycle(payload: StopCycleRequest):
+    if payload.cycle_code in _automatic_cycle_codes:
+        raise HTTPException(status_code=409, detail="Siklus Auto dikendalikan oleh timer; matikan Auto untuk mengakhiri lebih awal")
+    return {"status": "ok", "cycle_result": _stop_cycle(payload.cycle_code)}
+
+
+def _stop_cycle(cycle_code: str):
     with _workers_lock:
-        if payload.cycle_code in _active_cycle_workers:
-            stop_event, thread = _active_cycle_workers.pop(payload.cycle_code)
+        if cycle_code in _active_cycle_workers:
+            stop_event, thread = _active_cycle_workers[cycle_code]
             stop_event.set()
             thread.join(timeout=30.0)
             if thread.is_alive():
                 raise HTTPException(status_code=503, detail="Capture is still finishing; retry stop")
+            del _active_cycle_workers[cycle_code]
 
-    result = AIRepository.stop_cycle(payload.cycle_code)
+    result = AIRepository.stop_cycle(cycle_code)
     if not result:
-        raise HTTPException(status_code=404, detail=f"Cycle {payload.cycle_code} not found")
-    return {"status": "ok", "cycle_result": result}
+        raise HTTPException(status_code=503, detail=f"Cycle {cycle_code} could not be finalized; retry stop")
+    return result
 
 
 @app.post("/infer")

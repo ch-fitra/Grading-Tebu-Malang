@@ -1,5 +1,5 @@
-import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen, PanelLeftOpen, PanelLeftClose } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "./store";
 import { LoginPage } from "./components/LoginPage";
 import { DashboardPage } from "./components/DashboardPage";
@@ -24,8 +24,33 @@ type TabId = (typeof tabs)[number]["id"];
 export default function App() {
   const [tab, setTab] = useState<TabId>("dashboard");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const { session, refresh, logout, validateSession } = useAppStore();
   const permissions = session?.user.permissions ?? [];
+
+  useEffect(() => { setSidebarExpanded(false); }, [session?.token]);
+
+  useEffect(() => {
+    if (!sidebarExpanded) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !sidebarRef.current?.contains(event.target)) setSidebarExpanded(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSidebarExpanded(false);
+      sidebarToggleRef.current?.focus();
+    };
+    const closeOnWindowBlur = () => setSidebarExpanded(false);
+    document.addEventListener("pointerdown", closeOutside, true);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("blur", closeOnWindowBlur);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside, true);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("blur", closeOnWindowBlur);
+    };
+  }, [sidebarExpanded]);
 
   useEffect(() => { if (session) validateSession(); }, [session?.token, validateSession]);
 
@@ -76,9 +101,11 @@ export default function App() {
     <div className={`shell ${sidebarExpanded ? "sidebar-expanded" : "sidebar-collapsed"}`}>
       <aside 
         className="sidebar"
-        onMouseEnter={() => setSidebarExpanded(true)}
-        onMouseLeave={() => setSidebarExpanded(false)}
-        onFocus={() => setSidebarExpanded(true)}
+        ref={sidebarRef}
+        aria-label="Menu utama"
+        onPointerLeave={(event) => {
+          if (event.pointerType !== "touch") setSidebarExpanded(false);
+        }}
         onBlur={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) {
             setSidebarExpanded(false);
@@ -101,9 +128,18 @@ export default function App() {
           </div>
         </div>
 
+        <button type="button" className="sidebarToggle" ref={sidebarToggleRef}
+          aria-expanded={sidebarExpanded} aria-controls="sidebar-navigation"
+          aria-label={sidebarExpanded ? "Tutup menu" : "Buka menu"}
+          title={sidebarExpanded ? "Tutup menu" : "Buka menu"}
+          onClick={() => setSidebarExpanded(value => !value)}>
+          {sidebarExpanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          <span className="sidebarToggleLabel">Tutup menu</span>
+        </button>
+
         <div className="sidebarMenuLabel">SISTEM KENDALI MUTU</div>
 
-        <nav className="sidebarNav">
+        <nav className="sidebarNav" id="sidebar-navigation" aria-label="Navigasi halaman">
           {tabs.filter(item => {
             const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", access: "user.read" };
             return permissions.includes(required[item.id]);
@@ -114,8 +150,9 @@ export default function App() {
               <button 
                 key={item.id} 
                 className={`sidebarNavBtn ${isActive ? "active" : ""}`} 
-                onClick={() => setTab(item.id)} 
+                onClick={() => { setTab(item.id); setSidebarExpanded(false); }}
                 data-tooltip={item.label} 
+                title={item.label}
                 aria-label={item.label}
                 aria-current={isActive ? "page" : undefined}
               >

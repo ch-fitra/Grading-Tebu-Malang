@@ -5,12 +5,34 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
 import { InferenceResult, Grade } from "../types";
 import { Header } from "./shared/Header";
-import { api, backendUrl, getCameraStreamUrl } from "../utils/api";
+import { api, aiApi, backendUrl, getCameraStreamUrl } from "../utils/api";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
 
 export type FactoryKey = "trangkil" | "kebonagung";
+
+type AutoCycleStatus = {
+  camera_id: number;
+  enabled: boolean;
+  model_available: boolean;
+  phase: "off" | "waiting_full" | "confirming" | "starting" | "grading" | "finishing" | "waiting_clear" | "camera_unavailable" | "uncertain" | "error";
+  confirmed_seconds: number;
+  confirmation_seconds: number;
+  remaining_seconds: number;
+  grading_seconds: number;
+  cycle_code: string | null;
+  full_frame_confidence: number | null;
+  error: string | null;
+};
+
+type DetectionPage = {
+  items: (InferenceResult & { frameNumber: number })[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+};
 
 interface FactoryDefinition {
   id: FactoryKey;
@@ -146,16 +168,10 @@ export function DashboardPage() {
   const [capturePage, setCapturePage] = useState(1);
   const [dashboardPane, setDashboardPane] = useState("camera");
   const [eventPage, setEventPage] = useState(1);
-  const [eventPageSize, setEventPageSize] = useState(4);
-  const eventListRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!eventListRef.current) return;
-    const observer = new ResizeObserver(([entry]) => setEventPageSize(Math.max(1, Math.floor(entry.contentRect.height / 39))));
-    observer.observe(eventListRef.current);
-    return () => observer.disconnect();
-  }, []);
+  const [detectionPage, setDetectionPage] = useState<{ scope: string; result: DetectionPage } | null>(null);
+  const [detectionError, setDetectionError] = useState(false);
   const [timelinePage, setTimelinePage] = useState(1);
-  const [selectedCapture, setSelectedCapture] = useState<InferenceResult | null>(null);
+  const [selectedCapture, setSelectedCapture] = useState<(InferenceResult & { frameNumber?: number }) | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [clock, setClock] = useState(new Date());
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -168,7 +184,12 @@ export function DashboardPage() {
   const [cyclePickerOpen, setCyclePickerOpen] = useState(false);
   const cyclePickerRef = useRef<HTMLDivElement>(null);
   const [cycleElapsedSeconds, setCycleElapsedSeconds] = useState(0);
-  const [autoStopEnabled, setAutoStopEnabled] = useState(true);
+  const [autoMode, setAutoMode] = useState<AutoCycleStatus | null>(null);
+  const [autoModeBusy, setAutoModeBusy] = useState(false);
+  const [autoModeError, setAutoModeError] = useState<string | null>(null);
+  const autoMutationVersion = useRef(0);
+  const autoMutationBusy = useRef(false);
+  const autoCameraRef = useRef<number | undefined>(undefined);
   const [cycleFeedback, setCycleFeedback] = useState<string | null>(null);
   const autoScanTimerRef = useRef<NodeJS.Timeout | null>(null);
   const emptyFrameCountRef = useRef(0);
@@ -261,10 +282,70 @@ export function DashboardPage() {
   const currentLineDef = currentFactory.lines.find((l) => l.line === activeLine);
   const targetCameraId = currentLineDef?.cameraId;
   const activeCamera = targetCameraId ? cameras.find((c) => c.id === targetCameraId) : undefined;
+  autoCameraRef.current = targetCameraId;
+  const currentAutoMode = autoMode?.camera_id === targetCameraId ? autoMode : null;
+  const autoEnabled = currentAutoMode?.enabled === true;
+  const manualLocked = autoEnabled || autoModeBusy || !currentAutoMode || Boolean(autoModeError);
+
+  useEffect(() => {
+    setAutoMode(null);
+    setAutoModeError(null);
+    if (!targetCameraId || !session) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let previousCode: string | null | undefined;
+    const poll = async () => {
+      const version = autoMutationVersion.current;
+      try {
+        const result = await aiApi<AutoCycleStatus>(`/cycle/auto/${targetCameraId}`, { signal: AbortSignal.timeout(10000) });
+        if (!cancelled && !autoMutationBusy.current && version === autoMutationVersion.current) {
+          setAutoMode(result);
+          setAutoModeError(null);
+          if (previousCode !== undefined && previousCode !== result.cycle_code) void refresh();
+          previousCode = result.cycle_code;
+        }
+      } catch (error) {
+        if (!cancelled && !autoMutationBusy.current && version === autoMutationVersion.current) {
+          setAutoModeError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 750);
+      }
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [targetCameraId, session?.token, refresh]);
+
+  async function handleToggleAuto() {
+    if (!canInspect || !targetCameraId || !currentAutoMode || autoMutationBusy.current) return;
+    const cameraId = targetCameraId;
+    autoMutationBusy.current = true;
+    autoMutationVersion.current += 1;
+    setAutoModeBusy(true);
+    try {
+      const result = await aiApi<AutoCycleStatus>(`/cycle/auto/${cameraId}`, {
+        method: "PUT", body: JSON.stringify({ enabled: !currentAutoMode.enabled }), signal: AbortSignal.timeout(60000)
+      });
+      if (autoCameraRef.current === cameraId) {
+        setAutoMode(result);
+        setAutoModeError(null);
+        setSelectedCycleId(null);
+      }
+      await refresh();
+    } catch (error) {
+      if (autoCameraRef.current === cameraId) setAutoModeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      autoMutationVersion.current += 1;
+      autoMutationBusy.current = false;
+      setAutoModeBusy(false);
+    }
+  }
+
+  const autoStatusError = autoModeError || currentAutoMode?.error;
 
   // Active & historical cycles for current station
   const frameNumberMap = frameNumbers(history, truckSessions || []);
-  const frameNumber = (id: number) => frameNumberMap.get(id) ?? 1;
+  const frameNumber = (id: number) => (selectedCapture?.id === id ? selectedCapture.frameNumber : undefined) ?? frameNumberMap.get(id) ?? 1;
   const activeCycle = (truckSessions || []).find((s) => s.line === targetCameraId && s.status === "active") || null;
   const lineCycles = (truckSessions || []).filter((s) => s.line === targetCameraId);
   const selectedCycle = selectedCycleId ? lineCycles.find((s) => s.id === selectedCycleId) : null;
@@ -285,7 +366,7 @@ export function DashboardPage() {
   }, [activeCycle?.id]);
 
   async function handleStopCycle(reason?: string) {
-    if (!activeCycle || !canInspect) return;
+    if (!activeCycle || !canInspect || manualLocked) return;
     try {
       if (autoScanTimerRef.current) {
         clearInterval(autoScanTimerRef.current);
@@ -307,7 +388,7 @@ export function DashboardPage() {
   }, [activeCycle?.id, refresh]);
 
   async function handleStartCycle() {
-    if (!canInspect) return;
+    if (!canInspect || manualLocked) return;
     if (isAdmin) {
       alert("Akun Admin (Direksi) dibatasi dari kontrol fisik pemindaian conveyor. Hanya Akun Operator lapangan yang dapat memulai siklus.");
       return;
@@ -455,10 +536,40 @@ export function DashboardPage() {
     return t >= new Date(selectedCycle.startedAt).getTime() - 1000 &&
       t <= (selectedCycle.completedAt ? new Date(selectedCycle.completedAt).getTime() + 1000 : Date.now());
   }) : analysisFrames;
-  const displayedEvents = displayedCaptures;
-  const eventPages = Math.max(1, Math.ceil(displayedEvents.length / eventPageSize));
-  const safeEventPage = Math.min(eventPage, eventPages);
-  const visibleEvents = displayedEvents.slice((safeEventPage - 1) * eventPageSize, safeEventPage * eventPageSize);
+  const detectionScope = `${targetCameraId}:${selectedCycle?.id ?? ""}:${eventPage}`;
+  const currentDetectionPage = detectionPage?.scope === detectionScope ? detectionPage.result : null;
+  const eventTotal = currentDetectionPage?.total;
+  const eventPages = currentDetectionPage?.pages ?? 1;
+  const safeEventPage = currentDetectionPage?.page ?? eventPage;
+  const visibleEvents = currentDetectionPage?.items ?? [];
+
+  useEffect(() => {
+    setDetectionError(false);
+    if (!targetCameraId || !session) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
+    const loadPage = async () => {
+      const params = new URLSearchParams({ camera_id: String(targetCameraId), page: String(eventPage), page_size: "10" });
+      if (selectedCycle?.id) params.set("cycle_code", selectedCycle.id);
+      try {
+        const result = await aiApi<DetectionPage>(`/inference/history-page?${params}`, {
+          signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])
+        });
+        if (!cancelled) {
+          setDetectionPage({ scope: detectionScope, result });
+          setDetectionError(false);
+          if (result.page !== eventPage) setEventPage(result.page);
+        }
+      } catch {
+        if (!cancelled) setDetectionError(true);
+      } finally {
+        if (!cancelled) timer = setTimeout(loadPage, 1000);
+      }
+    };
+    void loadPage();
+    return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
+  }, [session?.token, targetCameraId, selectedCycle?.id, eventPage, detectionScope]);
 
   const activeCycleFrames = useMemo(() => {
     if (!activeCycle) return [];
@@ -679,69 +790,6 @@ export function DashboardPage() {
       (item.code === grade ? gradeConf * 100 : 0)) : 0
   })), [effectiveInference, grade, gradeConf, hasLatestInference]);
 
-  // Rekomendasi Operasional Mutu PG Trangkil (7 Kelas Resmi)
-  const factoryRecommendation = useMemo(() => {
-    if (!hasLatestInference) {
-      return { status: "IDLE", label: "Menunggu Pemindaian", desc: "Mulai pemindaian siklus tebu untuk memproses mutu", badgeClass: "idle" };
-    }
-    const g = normalizeGrade(grade);
-    if (g === "S") {
-      return {
-        status: "SUPER",
-        label: "Lolos Giling Mutu Prima (Bebas Rafaksi)",
-        desc: "Kadar kotoran < 1% – 2%. Batang tebu super bersih tanpa daun & pucuk. Bebas potongan bobot (0%).",
-        badgeClass: "super"
-      };
-    }
-    if (g === "M") {
-      return {
-        status: "STANDAR_M",
-        label: "Lolos Giling Standar Utama (Stempel M)",
-        desc: "Kadar kotoran 2% – 5%. Memenuhi standar ideal PG Trangkil (Stempel M pada SPAT, potongan bobot 0%).",
-        badgeClass: "standard"
-      };
-    }
-    if (g === "A") {
-      return {
-        status: "TOLERANSI_A",
-        label: "Lolos Toleransi Giling (Stempel A)",
-        desc: "Kadar kotoran 6% – 10%. Batas toleransi layak giling tanpa potongan bobot (Stempel A).",
-        badgeClass: "tolerance"
-      };
-    }
-    if (g === "D") {
-      return {
-        status: "DENDA_D",
-        label: "Diterima dengan Potongan Bobot 1%",
-        desc: "Kadar kotoran sedang (11% – 15%). Dikenakan sanksi potongan bobot (rafaksi) sebesar 1,0%. Catat nopol armada.",
-        badgeClass: "warning"
-      };
-    }
-    if (g === "B") {
-      return {
-        status: "DENDA_B",
-        label: "Diterima dengan Potongan Bobot 2,5%",
-        desc: "Kadar kotoran tinggi (16% – 20%). Dikenakan sanksi potongan bobot berat 2,5%. Pengawasan ketat meja tebu.",
-        badgeClass: "danger-soft"
-      };
-    }
-    if (g === "T") return { status: "CLASS_T", label: "Hasil Deteksi MBS T", desc: "Kelas T dari model AI. Aturan toleransi dan rafaksi perlu ditetapkan oleh pabrik.", badgeClass: "warning" };
-    if (g === "G") {
-      return {
-        status: "REJECT_G",
-        label: "Ditolak Giling (Reject Meja Tebu)",
-        desc: "Kotoran melebihi 20%. Tidak diizinkan masuk mesin giling; muatan wajib sortir ulang atau dipulangkan.",
-        badgeClass: "danger"
-      };
-    }
-    return {
-      status: "REJECT_X",
-      label: "Ditolak Mutlak (Afkir Ekstrem / Tolak DO)",
-      desc: "Tercampur material berbahaya (batu/kayu/besi/tanah gumpal) atau tebu busuk masif. SPAT ditolak total.",
-      badgeClass: "danger"
-    };
-  }, [hasLatestInference, grade]);
-
   // Statistik Konsistensi Siklus Meja Tebu (7 Kelas PT Trangkil)
   const cycleConsistency = useMemo(() => {
     if (!cycleModelFrames || cycleModelFrames.length === 0) return null;
@@ -813,7 +861,6 @@ export function DashboardPage() {
   const isOnline = status?.backend.status === "ok";
   const isAiOnline = status?.ai.status === "ok";
   const cameraLive = targetCameraId === 1 ? status?.ai.camera_1_live : targetCameraId === 2 ? status?.ai.camera_2_live : false;
-  const canAutoStop = status?.ai.capabilities?.conveyor_empty === true;
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
@@ -1110,53 +1157,39 @@ export function DashboardPage() {
                   </div>
                 </div>
 
-                {/* 2. Kebijakan Operasional Mutu & Disposisi Pabrik (Style Asli streamOperatorGuideCard) */}
-                <div className={`streamOperatorGuideCard ${factoryRecommendation.badgeClass}`}>
-                  <div className="operatorGuideTop">
-                    <span className="operatorGuideTag">
-                      <ShieldCheck size={11} />
-                      <span>KEPUTUSAN OPERASIONAL PABRIK</span>
-                    </span>
-                    <span className={`operatorGuideStatusPill ${factoryRecommendation.badgeClass}`}>
-                      {factoryRecommendation.status || "IDLE"}
-                    </span>
-                  </div>
-                  <div className="operatorDecisionBody">
-                    <strong className="operatorDecisionTitle">{factoryRecommendation.label}</strong>
-                    <p className="operatorDecisionDesc">{factoryRecommendation.desc}</p>
-                  </div>
-
-                  {/* Tata Kelola Pengawasan Direksi (Menggantikan Petunjuk Start/Stop Fisik Operator) */}
-                  <div className="operatorScanRules adminRules">
-                    <div className="scanRuleItem adminRuleItem">
-                      <span className="scanRuleDot blue" />
-                      <div className="scanRuleText">
-                        <strong>KEBIJAKAN RAFAKSI:</strong>
-                        <span>Potongan bobot dihitung otomatis dari rata-rata impuritas AI.</span>
-                      </div>
-                    </div>
-                    <div className="scanRuleItem adminRuleItem">
-                      <span className="scanRuleDot amber" />
-                      <div className="scanRuleText">
-                        <strong>INTEGRITAS DATA:</strong>
-                        <span>Penghapusan/koreksi frame wajib otorisasi PIN 2FA Direksi.</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </>
             ) : (
               /* ─── Operator Physical Conveyor Controls (Start/Stop Scan) ─── */
               <>
                 <div className="streamCycleBar">
-                  {activeCycle ? (
+                  <div className="cycleControlRow">
+                      <button type="button" className="cycleAutoButton" aria-pressed={autoEnabled}
+                        disabled={!canInspect || !targetCameraId || !currentAutoMode || autoModeBusy || (!autoEnabled && (!currentAutoMode.model_available || Boolean(activeCycle)))}
+                        onClick={handleToggleAuto}
+                        title={autoEnabled ? "Matikan Auto dan simpan siklus yang sedang berjalan" : "Aktifkan pemindaian otomatis saat tebu memenuhi seluruh frame"}>
+                        {autoModeBusy ? "Memproses..." : autoEnabled ? "Auto Aktif" : "Aktifkan Auto"}
+                        <span className="cycleAutoSwitch" aria-hidden="true" />
+                      </button>
+                      {activeCycle ? (
+                        <button type="button" className="stopCycleBtn" disabled={!canInspect || manualLocked}
+                          onClick={() => handleStopCycle("Dihentikan secara manual oleh operator")}
+                          title={autoEnabled ? "Matikan Auto untuk mengakhiri siklus lebih awal" : "Hentikan pemindaian dan simpan siklus ini"}>
+                          <Square size={13} fill="currentColor" />
+                          <span>Stop Manual</span>
+                        </button>
+                      ) : (
+                        <button type="button" className="startCycleBtn" onClick={handleStartCycle}
+                          disabled={!canInspect || !targetCameraId || !isStreaming || manualLocked}
+                          title={autoEnabled ? "Mode Auto aktif; tombol manual dikunci" : "Mulai deteksi siklus saat tebu diletakkan ke meja tebu"}>
+                          <Play size={13} fill="currentColor" />
+                          <span>Mulai Manual</span>
+                        </button>
+                      )}
+                  </div>
+                  {autoStatusError && <div className="cycleAutoStatus" role="alert">{autoStatusError}</div>}
+                  {activeCycle && (
                     <div className="cycleBarActiveRow">
                       <div className="cycleActiveMetaRow">
-                        <div className="cycleActiveBadge">
-                          <span className="pulse-dot-red" />
-                          <span>SIKLUS AKTIF</span>
-                        </div>
-                        <strong className="cycleActiveName">{activeCycle.truckCode}</strong>
                         <div className="cycleTimerBadge">
                           <Clock size={11} />
                           <span>{String(Math.floor(cycleElapsedSeconds / 60)).padStart(2, "0")}:{String(cycleElapsedSeconds % 60).padStart(2, "0")}</span>
@@ -1166,61 +1199,6 @@ export function DashboardPage() {
                         </div>
                       </div>
 
-                      <button
-                        type="button"
-                        className="stopCycleBtn"
-                        disabled={!canInspect}
-                        onClick={() => handleStopCycle("Dihentikan secara manual oleh operator")}
-                        title="Hentikan pemindaian dan simpan siklus ini"
-                      >
-                        <Square size={13} fill="currentColor" />
-                        <span>Stop Cycle / Stop Scan</span>
-                      </button>
-
-                      <div className="cycleBarSubRow">
-                        <span className="cycleScannerStatus scanning">
-                          <span className="scannerStatusDot red" />
-                          <span>Memindai Meja Tebu...</span>
-                        </span>
-                        <label className="cycleAutoStopToggle" title="Otomatis stop deteksi ketika tebu keluar dari frame CCTV (meja tebu bersih)">
-                          <input
-                            type="checkbox"
-                            checked={autoStopEnabled}
-                            disabled={!canInspect || !canAutoStop}
-                            onChange={(e) => setAutoStopEnabled(e.target.checked)}
-                          />
-                          <span>{canAutoStop ? "Auto-Stop Out-of-Frame" : "Auto-Stop Belum Tersedia"}</span>
-                        </label>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="cycleBarIdleRow">
-                      <button
-                        type="button"
-                        className="startCycleBtn"
-                        onClick={handleStartCycle}
-                        disabled={!canInspect || !targetCameraId || !isStreaming}
-                        title="Mulai deteksi siklus saat tebu diletakkan ke meja tebu"
-                      >
-                        <Play size={13} fill="currentColor" />
-                        <span>Start Cycle / Start Scan</span>
-                      </button>
-
-                      <div className="cycleBarSubRow">
-                        <span className="cycleScannerStatus standby">
-                          <span className="scannerStatusDot green" />
-                          <span>Kamera Siap Deteksi</span>
-                        </span>
-                        <label className="cycleAutoStopToggle" title="Otomatis stop deteksi saat tebu sudah habis / keluar dari frame CCTV">
-                          <input
-                            type="checkbox"
-                            checked={autoStopEnabled}
-                            disabled={!canInspect || !canAutoStop}
-                            onChange={(e) => setAutoStopEnabled(e.target.checked)}
-                          />
-                          <span>{canAutoStop ? "Auto-Stop Out-of-Frame" : "Auto-Stop Belum Tersedia"}</span>
-                        </label>
-                      </div>
                     </div>
                   )}
 
@@ -1231,40 +1209,6 @@ export function DashboardPage() {
                   )}
                 </div>
 
-                {/* PG Trangkil Factory Operational Decision & Operator Scan Guide */}
-                <div className={`streamOperatorGuideCard ${factoryRecommendation.badgeClass}`}>
-                  <div className="operatorGuideTop">
-                    <span className="operatorGuideTag">
-                      <ShieldCheck size={11} />
-                      <span>KEPUTUSAN OPERASIONAL PABRIK</span>
-                    </span>
-                    <span className={`operatorGuideStatusPill ${factoryRecommendation.badgeClass}`}>
-                      {factoryRecommendation.status || "IDLE"}
-                    </span>
-                  </div>
-                  <div className="operatorDecisionBody">
-                    <strong className="operatorDecisionTitle">{factoryRecommendation.label}</strong>
-                    <p className="operatorDecisionDesc">{factoryRecommendation.desc}</p>
-                  </div>
-
-                  {/* Panduan Praktis Operator: Saat Kapan Start Scan & Saat Kapan Stop Scan */}
-                  <div className="operatorScanRules">
-                    <div className="scanRuleItem start">
-                      <span className="scanRuleDot green" />
-                      <div className="scanRuleText">
-                        <strong>START SCAN:</strong>
-                        <span>Saat tebu mulai dituangkan ke meja tebu</span>
-                      </div>
-                    </div>
-                    <div className="scanRuleItem stop">
-                      <span className="scanRuleDot red" />
-                      <div className="scanRuleText">
-                        <strong>STOP SCAN:</strong>
-                        <span>Saat meja conveyor bersih atau tebu habis</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </>
             )}
 
@@ -1302,12 +1246,10 @@ export function DashboardPage() {
             <div className="eventFeedHeader">
               <div className="eventFeedTitle">
                 <span className="eventFeedTitleBadge">
-                  <Radio size={10} className={displayedEvents.length > 0 ? "pulse-dot" : ""} />
+                  <Radio size={10} className={eventTotal ? "pulse-dot" : ""} />
                   <span>{selectedCycle ? `Siklus: ${selectedCycle.truckCode}` : "Live Detection Event Stream"}</span>
                 </span>
-                {displayedEvents.length > 0 && (
-                  <span className="eventFeedCountBadge">{displayedEvents.length}</span>
-                )}
+                <span className="eventFeedCountBadge">{eventTotal?.toLocaleString("id-ID") ?? "—"}</span>
               </div>
               <div className="eventFeedHeaderRight">
                 {selectedCycle ? (
@@ -1321,15 +1263,15 @@ export function DashboardPage() {
                     <span>Realtime</span>
                   </button>
                 ) : (
-                  <span className={`eventFeedStatus ${displayedEvents.length > 0 ? "active" : "idle"}`}>
-                    {displayedEvents.length > 0 ? "STREAM LIVE" : "IDLE"}
+                  <span className={`eventFeedStatus ${eventTotal && !detectionError ? "active" : "idle"}`}>
+                    {detectionError ? "TERPUTUS" : !currentDetectionPage ? "MEMUAT" : eventTotal ? "STREAM LIVE" : "IDLE"}
                   </span>
                 )}
               </div>
             </div>
 
             {/* Structured Column Header */}
-            {displayedEvents.length > 0 && (
+            {Boolean(eventTotal) && (
               <div className="eventFeedColHeader">
                 <span className="colTime">Waktu</span>
                 <span className="colBatch">Frame</span>
@@ -1339,7 +1281,7 @@ export function DashboardPage() {
               </div>
             )}
 
-            <div className="eventFeedList" ref={eventListRef}>
+            <div className="eventFeedList">
               {visibleEvents.map((item) => {
                 const itemImpurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                 const normG = normalizeGrade(item.grade);
@@ -1355,12 +1297,12 @@ export function DashboardPage() {
                     type="button"
                     className="eventFeedRow"
                     onClick={() => setSelectedCapture(item)}
-                    title={`Klik untuk melihat detail Frame ${frameNumber(item.id)} (Grade MBS ${item.grade})`}
+                    title={`Klik untuk melihat detail Frame ${item.frameNumber} (Grade MBS ${item.grade})`}
                   >
                     <span className="eventFeedTime">
                       {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
-                    <span className="eventFeedId">{frameNumber(item.id)}</span>
+                    <span className="eventFeedId">{item.frameNumber}</span>
                     <span className={`eventFeedGrade ${gradeColor}`}>MBS {item.grade}</span>
                     <div className="eventFeedImpWrapper">
                       <span className="eventFeedImpurity">{itemImpurity.toFixed(1)}%</span>
@@ -1378,19 +1320,18 @@ export function DashboardPage() {
                   </button>
                 );
               })}
-              {displayedEvents.length === 0 && (
+              {visibleEvents.length === 0 && (
                 <div className="eventFeedEmpty">
                   <div className="eventFeedEmptyIcon">
                     <Radio size={22} />
                   </div>
                   <div className="eventFeedEmptyText">
-                    <strong>{selectedCycle ? "Tidak Ada Deteksi pada Siklus Ini" : `Belum Ada Deteksi MBS ${activeLine}`}</strong>
-                    <span>{selectedCycle ? "Pilih siklus lain atau kembalikan tampilan ke realtime" : "Klik tombol Start Cycle untuk memindai conveyor tebu"}</span>
+                    <strong>{detectionError ? "Data deteksi belum tersedia" : !currentDetectionPage ? "Memuat deteksi..." : selectedCycle ? "Tidak Ada Deteksi pada Siklus Ini" : `Belum Ada Deteksi MBS ${activeLine}`}</strong>
                   </div>
                 </div>
               )}
             </div>
-            {displayedEvents.length > 0 && <div className="eventFeedPagination">
+            {Boolean(eventTotal) && <div className="eventFeedPagination">
               <button disabled={safeEventPage === 1} onClick={() => setEventPage(safeEventPage - 1)} aria-label="Frame sebelumnya">&lsaquo;</button>
               <span>{safeEventPage} / {eventPages}</span>
               <button disabled={safeEventPage === eventPages} onClick={() => setEventPage(safeEventPage + 1)} aria-label="Frame berikutnya">&rsaquo;</button>
@@ -1421,6 +1362,7 @@ export function DashboardPage() {
                         className={`cyclePickerTrigger selected ${cyclePickerOpen ? "open" : ""}`}
                         onClick={() => setCyclePickerOpen(!cyclePickerOpen)}
                         aria-haspopup="listbox"
+                        aria-controls="cycle-filter-options"
                         aria-expanded={cyclePickerOpen}
                         title={`Siklus terpilih: ${selectedCycle.truckCode} • Klik untuk mengganti siklus`}
                       >
@@ -1456,6 +1398,7 @@ export function DashboardPage() {
                       className={`cyclePickerTrigger ${cyclePickerOpen ? "open" : ""}`}
                       onClick={() => setCyclePickerOpen(!cyclePickerOpen)}
                       aria-haspopup="listbox"
+                      aria-controls="cycle-filter-options"
                       aria-expanded={cyclePickerOpen}
                       title="Pilih filter siklus pemeriksaan meja tebu"
                     >
@@ -1473,20 +1416,34 @@ export function DashboardPage() {
 
                   {/* Floating Custom Dropdown Popover */}
                   {cyclePickerOpen && (
-                    <div className="cyclePickerDropdown" role="listbox">
+                    <div className="cyclePickerDropdown" id="cycle-filter-options" role="listbox" aria-label="Pilih siklus meja tebu"
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setCyclePickerOpen(false);
+                          cyclePickerRef.current?.querySelector<HTMLButtonElement>(".cyclePickerTrigger")?.focus();
+                          return;
+                        }
+                        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                        event.preventDefault();
+                        const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='option']"));
+                        const current = options.indexOf(document.activeElement as HTMLButtonElement);
+                        const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+                          : event.key === "ArrowDown" ? (current + 1) % options.length : (current - 1 + options.length) % options.length;
+                        options[next]?.focus();
+                      }}>
                       <div className="cyclePickerDropdownHeader">
                         <span className="cyclePickerDropdownTitle">
                           <Layers size={11} />
-                          <span>Filter Siklus Meja Tebu</span>
+                          <span>Pilih siklus</span>
                         </span>
                         <span className="cyclePickerDropdownCount">
-                          {lineCycles.length} Siklus Terdata
+                          {lineCycles.length} siklus
                         </span>
                       </div>
 
                       <div className="cyclePickerDropdownList">
                         {/* Realtime Option */}
-                        <div
+                        <button type="button"
                           className={`cyclePickerItem realtime ${!selectedCycleId ? "active" : ""}`}
                           onClick={() => {
                             setSelectedCycleId(null);
@@ -1501,16 +1458,13 @@ export function DashboardPage() {
                             </div>
                             <div className="cyclePickerItemInfo">
                               <div className="cyclePickerItemMain">
-                                <strong>Siaran Realtime (Live Stream)</strong>
+                                <strong>Mode Realtime</strong>
                                 <span className="cyclePickerLiveBadge">LIVE</span>
                               </div>
-                              <span className="cyclePickerItemMeta">
-                                Menampilkan semua deteksi terkini dari kamera meja tebu secara langsung
-                              </span>
                             </div>
                           </div>
                           {!selectedCycleId && <Check size={14} className="cyclePickerItemCheck" />}
-                        </div>
+                        </button>
 
                         {lineCycles.length > 0 && <div className="cyclePickerDivider" />}
 
@@ -1518,18 +1472,18 @@ export function DashboardPage() {
                         {lineCycles.length === 0 ? (
                           <div className="cyclePickerEmpty">
                             <span>Belum ada siklus yang tercatat</span>
-                            <small>Tekan Start Cycle untuk memulai pencatatan siklus baru</small>
                           </div>
                         ) : (
                           lineCycles.map((cycle) => {
                             const isSelected = selectedCycleId === cycle.id;
                             const isActive = cycle.status === "active";
                             const timeStr = new Date(cycle.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit" });
+                            const dateStr = new Date(cycle.startedAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
                             const count = cycle.totalCaptures || 0;
                             const gradeCode = cycle.finalDecision || "MBS";
 
                             return (
-                              <div
+                              <button type="button"
                                 key={cycle.id}
                                 className={`cyclePickerItem ${isSelected ? "active" : ""} ${isActive ? "running" : ""}`}
                                 onClick={() => {
@@ -1545,17 +1499,17 @@ export function DashboardPage() {
                                   </div>
                                   <div className="cyclePickerItemInfo">
                                     <div className="cyclePickerItemMain">
-                                      <strong className="cyclePickerTruckName">{cycle.truckCode}</strong>
+                                      <strong className="cyclePickerTruckName" title={cycle.truckCode}>{cycle.truckCode}</strong>
                                       {isActive ? (
-                                        <span className="cyclePickerStatusRunning">SEDANG BERJALAN</span>
+                                        <span className="cyclePickerStatusRunning">Aktif</span>
                                       ) : (
-                                        <span className="cyclePickerStatusDone">SELESAI</span>
+                                        <span className="cyclePickerStatusDone">Selesai</span>
                                       )}
                                     </div>
                                     <div className="cyclePickerItemDetails">
-                                      <span><Clock size={10} /> {timeStr}</span>
+                                      <span><Clock size={10} /> {dateStr}, {timeStr}</span>
                                       <span>•</span>
-                                      <span><Camera size={10} /> {count} frame</span>
+                                      <span><Camera size={10} /> {count.toLocaleString("id-ID")} frame</span>
                                       {cycle.plateNumber && (
                                         <>
                                           <span>•</span>
@@ -1568,11 +1522,11 @@ export function DashboardPage() {
 
                                 <div className="cyclePickerItemRight">
                                   <span className={`cyclePickerGradeTag grade-${gradeCode.toLowerCase()}`}>
-                                    {gradeCode}
+                                    {gradeCode.replaceAll("_", " ")}
                                   </span>
                                   {isSelected && <Check size={14} className="cyclePickerItemCheck" />}
                                 </div>
-                              </div>
+                              </button>
                             );
                           })
                         )}
