@@ -43,7 +43,7 @@ class AIRepository:
                 cursor.execute("""
                     SELECT COUNT(*) AS total_captures,
                            AVG(i.confidence) AS average_confidence,
-                           AVG(i.daun_percent + i.pucuk_percent + i.sampah_percent) AS average_impurity
+                           AVG(i.daun_percent + i.pucuk_percent + i.sampah_percent) FILTER (WHERE i.impurity_measured IS TRUE) AS average_impurity
                     FROM inference_results i
                     LEFT JOIN cameras c ON c.id = i.camera_id
                     WHERE """ + " AND ".join(conditions), params)
@@ -86,6 +86,7 @@ class AIRepository:
                     "classes": {"daun": float(row["daun_percent"]), "pucuk": float(row["pucuk_percent"]), "sampah": float(row["sampah_percent"])},
                     "confidence": float(row["confidence"]), "snapshot": row["snapshot_path"],
                     "frameNumber": int(row["frame_number"]),
+                    "impurityMeasured": row["impurity_measured"] is True,
                 } for row in cursor.fetchall()]
         # Preserve the actual model class/scores for older captures, just as the existing API does.
         paths = [item["snapshot"].lstrip("/") for item in items if item["snapshot"]]
@@ -99,7 +100,8 @@ class AIRepository:
                 detection = detections.get((item["snapshot"] or "").lstrip("/"))
                 if detection and detection["detected_class"] in ("S", "M", "A", "D", "B", "T", "G", "X"):
                     item["grade"] = detection["detected_class"]
-                    item["classScores"] = detection["classes_score"]
+                    if not any(key in detection["classes_score"] for key in ("daun", "pucuk", "sampah")):
+                        item["classScores"] = detection["classes_score"]
         return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
 
     @staticmethod
@@ -115,6 +117,21 @@ class AIRepository:
             return None
 
     # --- Camera Management (from DB: sugarcane_ai) ---
+    @staticmethod
+    def register_camera(camera_id: int, rtsp_url: str, name: str):
+        with closing(get_ai_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""INSERT INTO ai_cameras(id,camera_code,name,rtsp_url,is_active)
+                    VALUES(%s,%s,%s,%s,true) ON CONFLICT(id) DO UPDATE
+                    SET name=EXCLUDED.name,rtsp_url=EXCLUDED.rtsp_url,is_active=true,updated_at=NOW()""",
+                    (camera_id, f"CAM_API_{camera_id}", name, rtsp_url))
+
+    @staticmethod
+    def deactivate_camera(camera_id: int):
+        with closing(get_ai_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE ai_cameras SET is_active=false,updated_at=NOW() WHERE id=%s", (camera_id,))
+
     @staticmethod
     def get_active_cameras() -> List[Dict[str, Any]]:
         try:
@@ -305,7 +322,7 @@ class AIRepository:
         model_version: str,
         snapshot_path: str,
         classes_score: Dict[str, float],
-        total_impurity: float,
+        total_impurity: Optional[float],
         detected_class: str,
         confidence: float,
         image_blob: Optional[bytes] = None,

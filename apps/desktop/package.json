@@ -6,7 +6,7 @@
   "type": "commonjs",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "npm run build -w @sugarcane/web && npm run build && node scripts/ensure-electron.cjs && set ELECTRON_RUN_AS_NODE=&& electron dist/main.js",
+    "dev": "npm run build && node scripts/ensure-electron.cjs && node scripts/dev.mjs",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "package": "npm run build -w @sugarcane/web && npm run build && electron-builder"

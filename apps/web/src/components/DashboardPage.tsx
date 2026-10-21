@@ -1,10 +1,9 @@
 import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
-import { Cpu, Clock, Camera, Radio, Activity, CheckCircle, CheckCircle2, AlertTriangle, Shield, ShieldCheck, ShieldAlert, Crown, Layers, VideoOff, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, Wifi, WifiOff, TrendingUp, BarChart3, Leaf, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
+import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
 import { InferenceResult, Grade } from "../types";
-import { Header } from "./shared/Header";
 import { api, aiApi, backendUrl, getCameraStreamUrl } from "../utils/api";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
@@ -112,11 +111,10 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-export { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "../utils/grade-guide";
 import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
-  const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
+  const { latest, status, refresh, history, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
   const [modelFrames, setModelFrames] = useState<InferenceResult[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -281,7 +279,6 @@ export function DashboardPage() {
   const currentFactory = FACTORIES[activeFactory];
   const currentLineDef = currentFactory.lines.find((l) => l.line === activeLine);
   const targetCameraId = currentLineDef?.cameraId;
-  const activeCamera = targetCameraId ? cameras.find((c) => c.id === targetCameraId) : undefined;
   autoCameraRef.current = targetCameraId;
   const currentAutoMode = autoMode?.camera_id === targetCameraId ? autoMode : null;
   const autoEnabled = currentAutoMode?.enabled === true;
@@ -617,17 +614,6 @@ export function DashboardPage() {
   // Tab mode for right panel: Realtime Cycle vs Daily Cross-Cycle Summary
   const [analysisTab, setAnalysisTab] = useState<"realtime" | "daily">("realtime");
 
-  // Helper mapping impurity to Trangkil 7-Grade
-  const getGradeFromImpurity = (imp: number): Grade => {
-    if (imp <= 2) return "S" as Grade;
-    if (imp <= 5) return "M" as Grade;
-    if (imp <= 10) return "A" as Grade;
-    if (imp <= 15) return "D" as Grade;
-    if (imp <= 20) return "B" as Grade;
-    if (imp <= 35) return "G" as Grade;
-    return "X" as Grade;
-  };
-
   // Effective inference for category analysis:
   // 1. If currently running an active cycle: AVERAGE ALL FRAMES from the start of the active cycle!
   // 2. If a specific cycle is filtered: AVERAGE ALL FRAMES belonging to that cycle!
@@ -641,13 +627,13 @@ export function DashboardPage() {
       const avgDaun = Math.round((sumDaun / count) * 10) / 10;
       const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
       const avgSampah = Math.round((sumSampah / count) * 10) / 10;
-      const avgImp = Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
       const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: avgConf,
         grade: dominantGrade(activeCycleFrames) ?? "M",
         classScores: meanClassScores(activeCycleFrames),
+        impurityMeasured: activeCycleFrames.every(frame => frame.impurityMeasured === true),
         id: activeCycleFrames[0]?.id || 0,
         timestamp: activeCycle.startedAt,
         cameraId: targetCameraId || 0,
@@ -665,12 +651,12 @@ export function DashboardPage() {
       const avgDaun = Math.round((sumDaun / count) * 10) / 10;
       const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
       const avgSampah = Math.round((sumSampah / count) * 10) / 10;
-      const avgImp = selectedCycle?.averageImpurity ?? Math.round((avgDaun + avgPucuk + avgSampah) * 10) / 10;
       return {
         classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: cycleModelFrames.reduce((sum, frame) => sum + frame.confidence, 0) / count,
         grade: dominantGrade(cycleModelFrames) ?? "M",
         classScores: meanClassScores(cycleModelFrames),
+        impurityMeasured: cycleModelFrames.every(frame => frame.impurityMeasured === true),
         id: cycleModelFrames[0]?.id || 0,
         timestamp: selectedCycle?.startedAt ?? cycleModelFrames[0].timestamp,
         cameraId: targetCameraId || 0,
@@ -684,7 +670,6 @@ export function DashboardPage() {
   }, [activeCycle, activeCycleFrames, selectedCycle, cycleModelFrames, latest, targetCameraId]);
 
   const cycleGrade = (cycle: typeof lineCycles[number]): Grade => {
-    const ids = new Set(cycle.captureIds || []);
     const start = new Date(cycle.startedAt).getTime();
     const end = cycle.completedAt ? new Date(cycle.completedAt).getTime() : Date.now();
     const frames = analysisFrames.filter(item =>
@@ -744,6 +729,7 @@ export function DashboardPage() {
         completedAt: c.completedAt,
         frames: analysisFrames.filter(item => { const t = new Date(item.timestamp).getTime(); return t >= new Date(c.startedAt).getTime() - 1000 && t <= (c.completedAt ? new Date(c.completedAt).getTime() + 1000 : Date.now()); }).length,
         impurity: Math.round((c.averageImpurity || 0) * 10) / 10,
+        impurityMeasured: c.impurityMeasured === true,
         grade: cGrade,
         gradeDef,
         decision: c.finalDecision,
@@ -756,6 +742,7 @@ export function DashboardPage() {
       completedCount: completedCycles.length,
       totalFrames,
       avgImpurity: Math.round(avgImpurity * 10) / 10,
+      impurityMeasured: cycles.length > 0 && cycles.every(c => c.impurityMeasured === true),
       avgConfidence,
       overallGrade,
       passPct,
@@ -776,11 +763,8 @@ export function DashboardPage() {
   }, [dailyCyclesStats?.cycleTimeline, currentTimelinePage, timelinePageSize]);
 
   const hasLatestInference = Boolean(effectiveInference);
-  const classes = effectiveInference?.classes ?? { daun: 0, pucuk: 0, sampah: 0 };
   const confidence = effectiveInference?.confidence ?? 0;
   const grade = effectiveInference?.grade;
-  const impurity = classes.daun + classes.pucuk + classes.sampah;
-  const background = hasLatestInference ? Math.max(0, 100 - impurity) : 0;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
 
   // Model scores are persisted percentages; no invented neighbouring probabilities.
@@ -826,7 +810,6 @@ export function DashboardPage() {
 
     if (totalTrucks === 0 && activeLineHistory.length > 0) {
       activeLineHistory.forEach((item) => {
-        const imp = item.classes.daun + item.classes.pucuk + item.classes.sampah;
         const g = item.grade;
         if (["S", "M", "A"].includes(g)) freePassCount++;
         else if (["D", "B"].includes(g)) penaltyCount++;
@@ -858,7 +841,6 @@ export function DashboardPage() {
     };
   }, [lineCycles, activeLineHistory, targetCameraId, history]);
 
-  const isOnline = status?.backend.status === "ok";
   const isAiOnline = status?.ai.status === "ok";
   const cameraLive = targetCameraId === 1 ? status?.ai.camera_1_live : targetCameraId === 2 ? status?.ai.camera_2_live : false;
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
@@ -1070,8 +1052,8 @@ export function DashboardPage() {
                     src={getCameraStreamUrl(targetCameraId, showHud, 80, streamKey)}
                     alt={`Live Stream ${currentFactory.name} MBS ${activeLine}`}
                     className="liveStreamImg"
-                    onError={handleStreamError}
-                    onLoad={handleStreamLoad}
+                    onError={event => { event.currentTarget.style.visibility = "hidden"; handleStreamError(); }}
+                    onLoad={event => { event.currentTarget.style.visibility = "visible"; handleStreamLoad(); }}
                   />
                   <div className="streamOverlayTag">
                     {currentFactory.shortName} • MBS {activeLine}
@@ -1305,12 +1287,12 @@ export function DashboardPage() {
                     <span className="eventFeedId">{item.frameNumber}</span>
                     <span className={`eventFeedGrade ${gradeColor}`}>MBS {item.grade}</span>
                     <div className="eventFeedImpWrapper">
-                      <span className="eventFeedImpurity">{itemImpurity.toFixed(1)}%</span>
+                      <span className="eventFeedImpurity">{item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"}</span>
                       <div className="eventFeedMiniBar">
                         <div
                           className="eventFeedMiniBarFill"
                           style={{
-                            width: `${Math.min(100, (itemImpurity / 20) * 100)}%`,
+                            width: `${item.impurityMeasured ? Math.min(100, (itemImpurity / 20) * 100) : 0}%`,
                             background: barColor
                           }}
                         />
@@ -1584,7 +1566,7 @@ export function DashboardPage() {
                     </span>
                     <span>•</span>
                     <span>
-                      Rata-rata Kotoran: <strong>{selectedCycle.averageImpurity.toFixed(1)}%</strong>
+                      Rata-rata Kotoran: <strong>{selectedCycle.impurityMeasured ? `${selectedCycle.averageImpurity.toFixed(1)}%` : "Tidak diukur"}</strong>
                     </span>
                     <span>•</span>
                     <span>
@@ -1637,7 +1619,7 @@ export function DashboardPage() {
                         </div>
                       )}
                       <span className={`photoGradeBadge ${gradeColor}`}>MBS {item.grade}</span>
-                      <span className="photoImpBadge">{itemImpurity.toFixed(1)}%</span>
+                      <span className="photoImpBadge">{item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"}</span>
                       {pendingInferenceIds.has(item.id) && (
                         <span style={{
                           position: "absolute",
@@ -1670,7 +1652,7 @@ export function DashboardPage() {
                           if (isOperator) {
                             setRequestDeletionTarget({
                               id: item.id,
-                              title: `Frame #${item.id} (${itemImpurity.toFixed(1)}% Kotoran • Grade ${item.grade})`,
+                              title: `Frame #${item.id} (${item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"} Kotoran • Grade ${item.grade})`,
                               subtitle: `Waktu Rekam: ${item.timestamp || "Baru saja"}`,
                               snapshotPath: item.snapshot ? (item.snapshot.startsWith("http") ? item.snapshot : `${backendUrl}${item.snapshot}`) : undefined
                             });
@@ -1928,7 +1910,7 @@ export function DashboardPage() {
                     </div>
                     <div className="dailyMetaStat">
                       <span>Avg Kotoran:</span>
-                      <strong>{dailyCyclesStats?.avgImpurity || 0}%</strong>
+                      <strong>{dailyCyclesStats?.impurityMeasured ? `${dailyCyclesStats.avgImpurity}%` : "Tidak diukur"}</strong>
                     </div>
                     <div className="dailyMetaStat">
                       <span>Siklus Selesai:</span>
@@ -2034,7 +2016,7 @@ export function DashboardPage() {
                           </span>
                         </div>
                         <div className="dailyCycleItemRight">
-                          <span className="dailyCycleImpurity">{item.impurity}% imp</span>
+                          <span className="dailyCycleImpurity">{item.impurityMeasured ? `${item.impurity}% imp` : "Tidak diukur"}</span>
                           <span className={`dailyCycleGradeBadge grade-${item.grade.toLowerCase()}`}>
                             MBS {item.grade}
                           </span>
@@ -2279,10 +2261,10 @@ export function DashboardPage() {
                       return;
                     }
                     if (isOperator) {
-                      const impPercent = ((selectedCapture.classes?.daun ?? 0) + (selectedCapture.classes?.pucuk ?? 0) + (selectedCapture.classes?.sampah ?? 0)) * 100;
+                      const impPercent = ((selectedCapture.classes?.daun ?? 0) + (selectedCapture.classes?.pucuk ?? 0) + (selectedCapture.classes?.sampah ?? 0));
                       setRequestDeletionTarget({
                         id: selectedCapture.id,
-                        title: `Frame #${selectedCapture.id} (${impPercent.toFixed(1)}% Kotoran • Grade ${selectedCapture.grade})`,
+                        title: `Frame #${selectedCapture.id} (${selectedCapture.impurityMeasured ? `${impPercent.toFixed(1)}% Kotoran` : "Kotoran tidak diukur"} • Grade ${selectedCapture.grade})`,
                         subtitle: `Waktu Rekam: ${selectedCapture.timestamp || "Baru saja"}`,
                         snapshotPath: selectedCapture.snapshot ? (selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`) : undefined
                       });

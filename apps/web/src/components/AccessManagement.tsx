@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Eye, EyeOff, Plus, Shield, Users, Pencil, Power, Trash2, X, Crown, Activity, CheckCircle2, ShieldAlert, ShieldCheck, Lock, FileSpreadsheet, FileCheck, XCircle, Clock } from "lucide-react";
+import { Eye, EyeOff, Plus, Shield, Users, Pencil, Power, X, Crown, Activity, CheckCircle2, ShieldAlert, ShieldCheck, Lock, FileCheck, XCircle, Clock } from "lucide-react";
 import { api } from "../utils/api";
 import { useAppStore } from "../store";
 import { Header } from "./shared/Header";
@@ -40,7 +40,6 @@ export function AccessManagement() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [view, setView] = useState<"users" | "roles" | "approvals">("users");
-  const [reviewNotesInput, setReviewNotesInput] = useState<Record<string, string>>({});
   const [approvalActionMsg, setApprovalActionMsg] = useState<string | null>(null);
 
   const pendingRequests = deletionRequests.filter(r => r.status === "pending");

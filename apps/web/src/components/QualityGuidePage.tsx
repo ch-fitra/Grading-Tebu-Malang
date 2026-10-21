@@ -46,7 +46,7 @@ export function QualityGuidePage() {
         ))}
       </div>
       <footer className="qualityGuideFooter">
-        <span>Kelas T: toleransi dan kebijakan rafaksi belum ditetapkan.</span>
+        <span>Kelas T: keputusan giling dan rafaksi menunggu peninjauan QC secara manual.</span>
         <div className="qualityGuidePagination">
           <button aria-label="Kelas sebelumnya" disabled={current === 0} onClick={() => setPage(current - 1)}><ChevronLeft size={16} /></button>
           <span>{current + 1} / {pages}</span>

@@ -4,9 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import {
   X,
   Truck,
-  Calendar,
-  Clock,
-  User,
   FileText,
   Camera,
   ShieldCheck,
@@ -15,11 +12,7 @@ import {
   Layers,
   Activity,
   Eye,
-  CheckCircle2,
-  AlertTriangle,
-  AlertCircle,
-  HelpCircle,
-  Factory
+  HelpCircle
 } from "lucide-react";
 import type { TruckInspectionSession, InferenceResult } from "../types";
 import { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "../utils/grade-guide";
@@ -29,17 +22,6 @@ interface TruckInspectionDetailModalProps {
   history: InferenceResult[];
   onClose: () => void;
   onViewCapture: (capture: InferenceResult) => void;
-}
-
-// Menentukan grade mutu tebu resmi (7 Kelas Mutu PG Trangkil) berdasarkan rata-rata kotoran
-function getGradeFromImpurity(impurity: number): string {
-  if (impurity <= 2) return "S";
-  if (impurity <= 5) return "M";
-  if (impurity <= 10) return "A";
-  if (impurity <= 15) return "D";
-  if (impurity <= 20) return "B";
-  if (impurity <= 35) return "G";
-  return "X";
 }
 
 // Resolver informasi Meja Tebu yang akurat (PG Trangkil MBS 5 / PG Kebon Agung MBS 1)
@@ -231,7 +213,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                     className="truck-metric-val"
                     style={{ color: curGradeConfig.color }}
                   >
-                    {session.averageImpurity.toFixed(1)}%
+                    {session.impurityMeasured ? `${session.averageImpurity.toFixed(1)}%` : "Tidak diukur"}
                   </strong>
                 </div>
                 <div className="truck-metric-item">
@@ -431,7 +413,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleCaptures.map((item, index) => {
+                      {visibleCaptures.map((item) => {
                         const cycleNumber = sortedCaptures.findIndex(frame => frame.id === item.id) + 1;
                         const impurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                         const normGrade = normalizeGrade(item.grade);
@@ -456,7 +438,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                             </td>
                             <td>
                               <strong className={`impurity-val ${impurity > 20 ? "text-danger" : impurity > 10 ? "text-amber" : "text-success"}`}>
-                                {impurity.toFixed(1)}%
+                                {item.impurityMeasured ? `${impurity.toFixed(1)}%` : "Tidak diukur"}
                               </strong>
                             </td>
                             <td>

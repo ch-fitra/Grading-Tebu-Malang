@@ -2,6 +2,10 @@ import { app, BrowserWindow, dialog, Menu } from "electron";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { desktopClientConfig } from "./config";
+import { startRendererServer } from "./renderer-server";
+
+let rendererServer: Awaited<ReturnType<typeof startRendererServer>> | undefined;
+let mainWindow: BrowserWindow | null = null;
 
 function rendererPath() {
   return app.isPackaged
@@ -10,11 +14,22 @@ function rendererPath() {
 }
 
 async function createWindow() {
+  // Development uses the same live React app as the browser. Packaged apps
+  // always use the bundled web build, independently of development variables.
+  const devUrl = app.isPackaged ? undefined : process.env.SUGARCANE_WEB_DEV_URL;
+  if (devUrl && devUrl !== "http://127.0.0.1:5175") {
+    throw new Error("Alamat UI pengembangan desktop harus http://127.0.0.1:5175");
+  }
   const indexPath = rendererPath();
   const clientConfig = desktopClientConfig();
-  if (!existsSync(indexPath)) {
+  if (!devUrl && !existsSync(indexPath)) {
     throw new Error(`UI desktop tidak ditemukan: ${indexPath}. Jalankan build web terlebih dahulu.`);
   }
+
+  if (!devUrl && !rendererServer) rendererServer = await startRendererServer(path.dirname(indexPath), clientConfig.apiBaseUrl);
+  const rendererUrl = devUrl ?? rendererServer!.url;
+  const apiBaseUrl = devUrl ? clientConfig.apiBaseUrl : rendererUrl;
+  const websocketUrl = devUrl ? clientConfig.websocketUrl : `${rendererUrl.replace(/^http/, "ws")}/ws`;
 
   const window = new BrowserWindow({
     width: 1360,
@@ -32,17 +47,19 @@ async function createWindow() {
       sandbox: true,
       webSecurity: true,
       additionalArguments: [
-        `--sugarcane-api-url=${clientConfig.apiBaseUrl}`,
-        `--sugarcane-websocket-url=${clientConfig.websocketUrl}`,
+        `--sugarcane-api-url=${apiBaseUrl}`,
+        `--sugarcane-websocket-url=${websocketUrl}`,
         `--sugarcane-ai-service-url=${clientConfig.aiServiceUrl}`
       ]
     }
   });
+  mainWindow = window;
+  window.once("closed", () => { if (mainWindow === window) mainWindow = null; });
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.once("ready-to-show", () => window.show());
-  await window.loadFile(indexPath);
+  await window.loadURL(rendererUrl);
 }
 
 app.whenReady().then(async () => {
@@ -65,3 +82,4 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+app.on("before-quit", () => { void rendererServer?.close(); });

@@ -10,18 +10,17 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUpDown,
-  Truck,
   Clock,
   Layers,
   Info,
-  Check,
-  Building2
+  Check
 } from "lucide-react";
 import { useAppStore } from "../store";
 import { downloadCsv } from "../utils/csv";
 import { resolveMbsStation } from "../utils/stations";
+import { dominantGrade } from "../utils/grade-data";
 
-import { getAiGrade, parseExcelOrCsv, matchTappingRecords, reassignTapping, swapTapping, type TappingRecord, type ReconciliationRow, type FileImportStats } from "../utils/tapping";
+import { parseExcelOrCsv, matchTappingRecords, reassignTapping, swapTapping, type TappingRecord, type ReconciliationRow, type FileImportStats } from "../utils/tapping";
 
 interface TappingSyncModalProps {
   isOpen: boolean;
@@ -30,7 +29,7 @@ interface TappingSyncModalProps {
 }
 
 export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModalProps) {
-  const { truckSessions, cameras, syncTappingData } = useAppStore();
+  const { truckSessions, cameras, history, syncTappingData } = useAppStore();
 
   // All imported records (e.g. 5,894 across meja 1-5)
   const [allImportedRecords, setAllImportedRecords] = useState<TappingRecord[]>([]);
@@ -517,7 +516,8 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                     const station = resolveMbsStation(cycle.line, cameras);
                     const cycleStart = new Date(cycle.startedAt);
                     const matchedTap = activeRecords.find((t) => t.id === row.assignedTappingId);
-                    const aiGrade = getAiGrade(cycle.averageImpurity);
+                    const detectedGrade = cycle.detectedGrade ?? dominantGrade(history.filter(frame => cycle.captureIds.includes(frame.id)));
+                    const aiGrade = detectedGrade ?? "Belum ada hasil";
 
                     // Compute time difference in minutes
                     let gapMinutes: number | null = null;
@@ -540,7 +540,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
 
                     // Compare Factory Grade vs AI Grade
                     const isGradeMatch =
-                      matchedTap && matchedTap.factoryGrade
+                      matchedTap && matchedTap.factoryGrade && detectedGrade
                         ? matchedTap.factoryGrade === aiGrade
                         : null;
 
@@ -572,7 +572,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                               <span>•</span>
                               <span>
                                 {cycle.totalCaptures} Frame • Impurity:{" "}
-                                <strong>{cycle.averageImpurity.toFixed(1)}%</strong>
+                                <strong>{cycle.impurityMeasured ? `${cycle.averageImpurity.toFixed(1)}%` : "Tidak diukur"}</strong>
                               </span>
                             </div>
                           </div>

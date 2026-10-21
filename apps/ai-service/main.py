@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import os
+import hmac
+import hashlib
 import logging
 import threading
 import json
@@ -27,7 +28,8 @@ logger = logging.getLogger("ai_service")
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, Response, Header
+from fastapi import FastAPI, HTTPException, Query, Response, Header, Request as FastAPIRequest
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -57,7 +59,7 @@ CONFIG_PATH = MODEL_DIR / "config.json"
 if not CONFIG_PATH.exists():
     CONFIG_PATH = ROOT / "models" / "active" / "config.json"
 
-SNAPSHOTS_DIR = AI_SERVICE_DIR / "storage" / "snapshots"
+SNAPSHOTS_DIR = Path(os.getenv("AI_SNAPSHOTS_DIR", str(AI_SERVICE_DIR / "storage" / "snapshots"))).resolve()
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -66,19 +68,16 @@ from fastapi.staticfiles import StaticFiles
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run Native DB Migrations for sugarcane_ai
-    try:
-        run_ai_migrations()
-    except Exception as e:
-        print(f"Warning on AI DB Migration startup: {e}")
+    run_ai_migrations()
 
     # Load active cameras 100% from database sugarcane_ai
     cameras = AIRepository.get_active_cameras()
     if cameras:
         for cam in cameras:
-            stream_manager.get_or_create(cam["id"], cam["rtsp_url"], cam["name"])
+            if cam.get("rtsp_url"):
+                stream_manager.get_or_create(cam["id"], cam["rtsp_url"], cam["name"])
     else:
-        # Fallback to PT Trangkil camera if empty
-        stream_manager.get_or_create(1, DEFAULT_TRANGKIL_WISENET_RTSP, "MBS 5 - PT Trangkil (Wisenet Meja 5)")
+        logger.warning("Tidak ada kamera aktif; periksa koneksi database dan konfigurasi kamera")
 
     try:
         # A service restart never leaves an automatic dashboard cycle marked active.
@@ -102,6 +101,17 @@ async def lifespan(app: FastAPI):
         stream_manager.stop_all()
 
 app = FastAPI(title="Tebu AI Service", version="0.2.0", lifespan=lifespan)
+
+@app.middleware("http")
+async def internal_service_access(request: FastAPIRequest, call_next):
+    if request.url.path not in ("/health", "/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect"):
+        expected = os.getenv("AI_SERVICE_TOKEN") or hmac.new(
+            os.getenv("JWT_SECRET", "local-development-secret-change-me").encode(),
+            b"sugarcane-ai-service", hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(request.headers.get("x-sugarcane-service-token", ""), expected):
+            return JSONResponse(status_code=401, content={"detail": "Akses layanan AI harus melalui backend"})
+    return await call_next(request)
 
 # Static Files Mount for serving snapshot images directly to frontend
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
@@ -161,7 +171,6 @@ def load_config() -> ModelConfig:
 
 # Auto-register Default Cameras on startup
 DEFAULT_KEBONAGUNG_RTSP = os.getenv("CCTV_KEBONAGUNG_RTSP_URL", "")
-DEFAULT_TRANGKIL_WISENET_RTSP = os.getenv("CCTV_TRANGKIL_RTSP_URL", "")
 
 _session_lock = threading.Lock()
 _session_key = None
@@ -171,8 +180,11 @@ _inference_lock = threading.RLock()
 
 
 def configured_model_path(config: ModelConfig) -> Path:
-    path = (AI_SERVICE_DIR / config.model_path.replace("apps/ai-service/", "")).resolve()
-    if not path.is_relative_to((AI_SERVICE_DIR / "models").resolve()) or path.suffix.lower() not in [".onnx", ".keras", ".h5"]:
+    value = config.model_path.replace("\\", "/")
+    base = ROOT if value.startswith(("apps/ai-service/", "models/archive/")) else AI_SERVICE_DIR
+    path = (base / value).resolve()
+    roots = [(AI_SERVICE_DIR / "models").resolve(), (ROOT / "models" / "archive").resolve()]
+    if not any(path.is_relative_to(root) for root in roots) or path.suffix.lower() not in [".onnx", ".keras", ".h5"]:
         raise HTTPException(status_code=400, detail="Lokasi model tidak valid. Hanya mendukung .onnx, .keras, atau .h5")
     return path
 
@@ -231,11 +243,15 @@ def classification_measurement(output: np.ndarray, config: ModelConfig) -> Tuple
             return segmentation_measurement(output, config)
         raise HTTPException(status_code=422, detail=f"Output model klasifikasi harus 1D tensor berukuran [{len(config.classes)}]")
     
-    if config.output_activation == "softmax" or arr.min() < 0 or arr.max() > 1.0:
+    if not np.isfinite(arr).all():
+        raise HTTPException(status_code=422, detail="Output model mengandung nilai tidak valid")
+    if config.output_activation == "softmax":
         exp_arr = np.exp(arr - np.max(arr))
         arr = exp_arr / exp_arr.sum()
     elif config.output_activation == "sigmoid":
         arr = 1.0 / (1.0 + np.exp(-np.clip(arr, -80, 80)))
+    elif arr.min() < 0 or arr.max() > 1:
+        raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
     
     # Scale to percentage (0.0 - 100.0%)
     classes = {name: round(float(prob) * 100, 2) for name, prob in zip(config.classes, arr)}
@@ -264,6 +280,24 @@ def segmentation_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[D
     confident = scores > config.threshold
     classes = {name: round(float(np.mean((winners == index) & confident)) * 100, 2) for index, name in enumerate(config.classes)}
     return classes, round(float(scores.mean()), 4)
+
+
+def measurement_result(classes: Dict[str, float], config: ModelConfig) -> Tuple[Dict[str, float], Optional[float], str, bool]:
+    """Keep grade probabilities distinct from measured segmentation area."""
+    if config.type == "classification":
+        scores = {grade: round(float(value), 2) for grade, value in classes.items()
+                  if grade in ("S", "M", "A", "D", "B", "T", "G", "X")}
+        if not scores:
+            raise HTTPException(status_code=422, detail="Model grading tidak menghasilkan kelas mutu yang dikenali")
+        return scores, None, max(scores, key=scores.get), False
+    if not all(name in classes for name in ("daun", "pucuk", "sampah")):
+        raise HTTPException(status_code=422, detail="Model segmentasi harus memiliki kelas daun, pucuk, dan sampah")
+    scores = {name: round(float(classes[name]), 2) for name in ("daun", "pucuk", "sampah")}
+    total = round(sum(scores.values()), 2)
+    grade = ("X" if scores["sampah"] > 15 or total > 35 else "G" if total > 20
+             else "B" if total > 15 else "D" if total > 10 else "A" if total > 5
+             else "M" if total > 2 else "S")
+    return scores, total, grade, True
 
 
 def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
@@ -417,13 +451,25 @@ def update_roi(camera_id: int, payload: ROIModel):
 
 @app.post("/cameras/register")
 def register_camera(payload: CameraRegisterPayload):
+    AIRepository.register_camera(payload.camera_id, payload.rtsp_url, payload.camera_name)
     stream = stream_manager.get_or_create(payload.camera_id, payload.rtsp_url, payload.camera_name)
     return {
         "status": "ok",
         "camera_id": payload.camera_id,
         "connected": stream.is_connected,
-        "rtsp_url": payload.rtsp_url,
     }
+
+
+@app.delete("/cameras/{camera_id}")
+def deactivate_camera(camera_id: int):
+    controller = _auto_controller(camera_id)
+    with controller.lock:
+        controller.set_enabled(False)
+        AIRepository.deactivate_camera(camera_id)
+        stream = stream_manager.streams.pop(camera_id, None)
+        if stream:
+            stream.stop()
+    return {"status": "ok"}
 
 
 _active_cycle_workers: Dict[str, Tuple[threading.Event, threading.Thread]] = {}
@@ -578,24 +624,6 @@ def set_auto_mode(camera_id: int, payload: AutoModeRequest, authorization: Optio
         return {**controller.set_enabled(payload.enabled), "model_available": True}
 
 
-def _generate_synthetic_sugarcane_frame() -> np.ndarray:
-    """Generates a realistic 1280x720 sugarcane conveyor frame for offline simulation."""
-    frame = np.full((720, 1280, 3), (30, 40, 35), dtype=np.uint8)
-    cv2.rectangle(frame, (180, 100), (1100, 620), (50, 60, 55), -1)
-    for y in range(120, 600, 40):
-        cv2.line(frame, (180, y), (1100, y), (20, 30, 25), 3)
-    t_seed = int(time.time() * 10) % 10000
-    rng = np.random.RandomState(t_seed)
-    for _ in range(25):
-        x1 = rng.randint(220, 1000)
-        y1 = rng.randint(140, 560)
-        x2 = x1 + rng.randint(60, 180)
-        y2 = y1 + rng.randint(-20, 20)
-        color = (int(rng.randint(40, 80)), int(rng.randint(120, 180)), int(rng.randint(100, 160)))
-        cv2.line(frame, (x1, y1), (x2, y2), color, int(rng.randint(8, 16)))
-    return frame
-
-
 def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event, deadline: Optional[float] = None):
     logger.info(f"Started autonomous background cycle scan worker for {cycle_code} (camera #{camera_id})")
     frame_idx = 0
@@ -610,7 +638,9 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             config = load_config()
             stream = stream_manager.get_stream(camera_id)
             if not stream:
-                stream = stream_manager.get_or_create(camera_id, DEFAULT_TRANGKIL_WISENET_RTSP, "MBS 5 - PT Trangkil (Wisenet Meja 5)")
+                camera = next((item for item in AIRepository.get_active_cameras() if item["id"] == camera_id), None)
+                if camera and camera.get("rtsp_url"):
+                    stream = stream_manager.get_or_create(camera_id, camera["rtsp_url"], camera["name"])
 
             all_rois = load_all_rois()
             roi = all_rois.get(camera_id)
@@ -635,21 +665,7 @@ def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int],
             if not cv2.imwrite(str(snapshot_path), image):
                 raise RuntimeError("Failed to persist cycle snapshot")
 
-            mapped_scores = {
-                "S": round(float(classes.get("S", 0.0)), 2),
-                "A": round(float(classes.get("A", classes.get("daun", 0.0))), 2),
-                "B": round(float(classes.get("B", classes.get("pucuk", 0.0))), 2),
-                "D": round(float(classes.get("D", 0.0)), 2),
-                "G": round(float(classes.get("G", 0.0)), 2),
-                "M": round(float(classes.get("M", 0.0)), 2),
-                "T": round(float(classes.get("T", classes.get("sampah", 0.0))), 2),
-            }
-
-            daun_score = mapped_scores["A"]
-            pucuk_score = mapped_scores["B"]
-            sampah_score = mapped_scores["T"]
-            total_impurity = round(daun_score + pucuk_score + sampah_score, 2)
-            detected_class = max(mapped_scores, key=mapped_scores.get)
+            mapped_scores, total_impurity, detected_class, _ = measurement_result(classes, config)
 
             _, encoded_jpg = cv2.imencode(".jpg", image)
             image_bytes = encoded_jpg.tobytes() if encoded_jpg is not None else None
@@ -794,39 +810,8 @@ def infer(payload: InferRequest):
     if not cv2.imwrite(str(snapshot_path), image):
         raise HTTPException(status_code=500, detail="Gagal menyimpan snapshot")
 
-    # Map scores including Class S (Super Clean) and Indexes 0=A, 1=B, 2=D, 3=G, 4=M, 5=T
-    mapped_scores = {
-        "S": round(float(classes.get("S", 0.0)), 2),
-        "A": round(float(classes.get("A", classes.get("daun", 0.0))), 2),
-        "B": round(float(classes.get("B", classes.get("pucuk", 0.0))), 2),
-        "D": round(float(classes.get("D", 0.0)), 2),
-        "G": round(float(classes.get("G", 0.0)), 2),
-        "M": round(float(classes.get("M", 0.0)), 2),
-        "T": round(float(classes.get("T", classes.get("sampah", 0.0))), 2),
-    }
-
-    daun_score = mapped_scores["A"]
-    pucuk_score = mapped_scores["B"]
-    sampah_score = mapped_scores["T"]
-    total_impurity = round(daun_score + pucuk_score + sampah_score, 2)
-
-    # Determine dominant detected class
-    detected_class = max(mapped_scores, key=mapped_scores.get)
-
-    if mapped_scores["T"] > 15.0 or total_impurity > 35.0:
-        grade = "X"
-    elif total_impurity > 20.0:
-        grade = "G"
-    elif total_impurity > 15.0:
-        grade = "B"
-    elif total_impurity > 10.0:
-        grade = "D"
-    elif total_impurity > 5.0:
-        grade = "A"
-    elif total_impurity > 2.0:
-        grade = "M"
-    else:
-        grade = "S"
+    mapped_scores, total_impurity, detected_class, impurity_measured = measurement_result(classes, config)
+    grade = detected_class
 
     # Encode image bytes for optional DB BLOB storage
     _, encoded_jpg = cv2.imencode(".jpg", image)
@@ -861,6 +846,7 @@ def infer(payload: InferRequest):
         "detected_class": detected_class,
         "grade": grade,
         "total_impurity": total_impurity,
+        "impurity_measured": impurity_measured,
         "confidence": confidence,
         "snapshot_path": rel_snapshot_path,
     }

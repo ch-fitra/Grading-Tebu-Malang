@@ -52,19 +52,3 @@ Model grading dan frame disimpan dalam cache terpisah.
 `GET /cycle/auto/{camera_id}` membaca status; `PUT /cycle/auto/{camera_id}` dengan
 `{"enabled": true}` atau `{"enabled": false}` mengubah mode. Keduanya memakai header
 `Authorization: Bearer <token aplikasi>`. Timer dan monitoring berada di server.
-
-## Verifikasi
-
-```powershell
-python -m unittest discover -s apps/ai-service/tests -v
-python -m unittest discover -s tests -p test_ai.py -v
-npm.cmd run build -w @sugarcane/web
-```
-
-Integrasi PostgreSQL opsional dengan transaksi yang selalu di-rollback:
-
-```powershell
-$env:AI_TEST_DATABASE = '1'
-python -m unittest discover -s apps/ai-service/tests -p test_auto_cycle_database.py -v
-Remove-Item Env:AI_TEST_DATABASE
-```

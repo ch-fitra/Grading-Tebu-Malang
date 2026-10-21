@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Send, X, AlertTriangle, FileText, CheckCircle2, ShieldCheck, Clock } from "lucide-react";
+import { Send, X, AlertTriangle, FileText, CheckCircle2, ShieldCheck } from "lucide-react";
 import { useAppStore } from "../store";
 
 interface RequestDeletionModalProps {
@@ -63,10 +63,6 @@ export function RequestDeletionModal({
     setError(null);
 
     try {
-      const fullReason = notes.trim() 
-        ? `${selectedReason}: ${notes.trim()}` 
-        : selectedReason;
-
       await submitDeletionRequest({
         targetType,
         targetId,

@@ -17,7 +17,7 @@ export function LoginPage() {
     try {
       await login(username, password);
     } catch (error) {
-      setError(error instanceof TypeError ? "Tidak dapat terhubung ke server API. Periksa koneksi dan alamat server desktop." : "Username atau password salah");
+      setError(error instanceof TypeError ? "Tidak dapat terhubung ke server API. Periksa koneksi dan alamat server desktop." : error instanceof Error ? error.message : "Login gagal. Silakan coba kembali.");
     } finally {
       setBusy(false);
     }

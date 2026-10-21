@@ -7,7 +7,6 @@ import {
   Camera,
   Filter,
   Search,
-  Sliders,
   X,
   RotateCcw,
   Download,
@@ -21,11 +20,7 @@ import {
   Eye,
   Trash2,
   Layers,
-  Wifi,
-  WifiOff,
-  Cpu,
   Lock,
-  RefreshCw,
   ChevronDown,
   SlidersHorizontal,
   FileSpreadsheet
@@ -36,9 +31,9 @@ import { TruckInspectionDetailModal } from "./TruckInspectionDetailModal";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
-import { TRANGKIL_GRADES, type TrangkilGradeCode } from "../utils/grade-guide";
+import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
 import { aiApi, backendUrl } from "../utils/api";
-import type { TruckInspectionSession, InferenceResult, Grade } from "../types";
+import type { TruckInspectionSession, InferenceResult } from "../types";
 
 import { resolveMbsStation } from "../utils/stations";
 
@@ -47,27 +42,6 @@ type HistorySummary = {
   average_confidence: number | null;
   average_impurity: number | null;
 };
-
-function normalizeGrade(g?: string): string {
-  if (!g) return "M";
-  const u = g.toUpperCase().trim().replace(/^MBS\s*/, "").trim();
-  if (["S", "M", "A", "D", "B", "T", "G", "X"].includes(u)) return u;
-  if (u === "REJECT" || u === "REJECT_G") return "G";
-  if (u === "REJECT_X") return "X";
-  if (u === "C") return "D";
-  if (u === "A/M") return "A";
-  return "M";
-}
-
-function getGradeFromImpurity(imp: number): string {
-  if (imp <= 2) return "S";
-  if (imp <= 5) return "M";
-  if (imp <= 10) return "A";
-  if (imp <= 15) return "D";
-  if (imp <= 20) return "B";
-  if (imp <= 35) return "G";
-  return "X";
-}
 
 export function HistoryPage() {
   const { history, truckSessions, cameras, session, status, deleteTruckInspection, deleteInference, deletionRequests } = useAppStore();
@@ -393,7 +367,7 @@ export function HistoryPage() {
         new Date(row.startedAt).toLocaleString("id-ID"),
         row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
         row.totalCaptures,
-        `${row.averageImpurity.toFixed(2)}%`,
+        row.impurityMeasured ? `${row.averageImpurity.toFixed(2)}%` : "Tidak diukur",
         `MBS ${cycleGrade(row)}`,
         `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
         TRANGKIL_GRADES.find(g => g.code === cycleGrade(row))?.decision ?? "Belum ditetapkan",
@@ -404,21 +378,6 @@ export function HistoryPage() {
     downloadCsv(`rekap-siklus-tebu-${Date.now()}.csv`, [header, ...body]);
   }
 
-  const getDecisionBadge = (decision: string) => {
-    switch (decision) {
-      case "MBS":
-        return <span className="decision-badge mbs">Lolos Bebas Rafaksi</span>;
-      case "NON_MBS":
-        return <span className="decision-badge non-mbs">Denda Rafaksi</span>;
-      case "DITOLAK_DO":
-        return <span className="decision-badge reject">Ditolak / Afkir</span>;
-      default:
-        return <span className="decision-badge pending">Dalam Proses</span>;
-    }
-  };
-
-  const isOnline = status?.backend.status === "ok";
-  const isAiOnline = status?.ai.status === "ok" || status?.ai.status === "ready";
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
@@ -1069,7 +1028,7 @@ export function HistoryPage() {
                             </span>
                           </td>
                           <td>
-                            <span className={`decision-badge ${curConfig.tier === "bebas" ? "mbs" : curConfig.tier === "rafaksi" ? "non-mbs" : "reject"}`}>
+                            <span className={`decision-badge ${curConfig.tier === "bebas" ? "mbs" : curConfig.tier === "rafaksi" ? "non-mbs" : curConfig.tier === "manual" ? "pending" : "reject"}`}>
                               {curConfig.status}
                             </span>
                           </td>

@@ -7,7 +7,7 @@ Proyek menggunakan dua database PostgreSQL:
 
 ## Database aplikasi
 
-Migrasi aktif berada di `database/postgres/` (001 sampai 005):
+Migrasi aktif berada di `database/postgres/` (001 sampai 006):
 
 ```powershell
 npm run db:up
@@ -26,4 +26,6 @@ Frame dan siklus tersimpan melalui `apps/ai-service/db/repository.py`. Snapshot 
 
 Backup kedua database beserta model, konfigurasi ROI, dan snapshot yang diperlukan. `npm run db:down` menghentikan database Docker tanpa menghapus volume. Hindari `docker compose down -v` kecuali memang ingin menghapus seluruh data volume.
 
-Tes integrasi menggunakan schema sementara; jalankan pada database pengembangan dengan izin yang sesuai. Referensi SQL Server lama tidak digunakan oleh runtime PostgreSQL.
+## Asal pengukuran kotoran
+
+Migrasi `006_impurity_measurement.sql` menambah `inference_results.impurity_measured`. Nilai `true` menandai pengukuran kelas fisik daun/pucuk/sampah; `false` menandai klasifikasi grade tanpa pengukuran fisik. Nilai `NULL` pada data historis berarti asal pengukuran belum diketahui. UI dan ekspor tidak menyajikan probabilitas kelas mutu sebagai persentase kotoran. Migrasi ini tidak menulis ulang angka historis.

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import psycopg2
+from psycopg2 import sql
+from psycopg2.extensions import parse_dsn
 from db.connection import AI_DB_URL, get_ai_db_connection
 
 logger = logging.getLogger("ai_migrations")
@@ -11,16 +13,19 @@ logger = logging.getLogger("ai_migrations")
 def ensure_ai_database_exists():
     """Ensure database sugarcane_ai exists in PostgreSQL."""
     try:
-        # Connect to default postgres DB to create sugarcane_ai if it does not exist
-        default_url = AI_DB_URL.rsplit('/', 1)[0] + '/postgres'
-        conn = psycopg2.connect(default_url)
+        connection = parse_dsn(AI_DB_URL)
+        database = connection.get("dbname")
+        if not database:
+            raise ValueError("AI_DATABASE_URL harus menyertakan nama database")
+        connection["dbname"] = "postgres"
+        conn = psycopg2.connect(**connection)
         conn.autocommit = True
         with conn.cursor() as cursor:
-            cursor.execute("SELECT 1 FROM pg_database WHERE datname = 'sugarcane_ai';")
+            cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (database,))
             exists = cursor.fetchone()
             if not exists:
-                cursor.execute("CREATE DATABASE sugarcane_ai;")
-                logger.info("Database 'sugarcane_ai' berhasil dibuat.")
+                cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database)))
+                logger.info("Database AI berhasil dibuat.")
         conn.close()
     except Exception as e:
         logger.warning(f"Note pada pemastian DB sugarcane_ai: {e}")
@@ -120,13 +125,15 @@ def run_ai_migrations():
                 ADD COLUMN IF NOT EXISTS cycle_code VARCHAR(50);
             """)
 
-            # Seed Default Cameras if empty (Only PT Trangkil camera with ID 1)
+            # IDs must match the API defaults: 1 = Kebon Agung, 2 = Trangkil.
             cursor.execute("""
                 INSERT INTO ai_cameras (id, camera_code, name, rtsp_url, location, roi_config)
                 VALUES 
-                (1, 'CAM_TRANGKIL_5', 'MBS 5 - PT Trangkil (Wisenet Meja 5)', %s, 'Meja Tebu 5', '{"camera_id": 1, "enabled": true, "x": 0.14, "y": 0.14, "width": 0.74, "height": 0.66, "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)", "show_grid": true, "show_telemetry": true, "show_scrim": true}'::jsonb)
-                ON CONFLICT (id) DO NOTHING;
-            """, (os.getenv("CCTV_TRANGKIL_RTSP_URL", ""),))
+                (1, 'CAM_KEBONAGUNG_1', 'MBS 1 - PT Kebon Agung (Malang)', %s, 'PG Kebon Agung (Malang)', NULL),
+                (2, 'CAM_TRANGKIL_5', 'MBS 5 - PT Trangkil (Wisenet Meja 5)', %s, 'PG Trangkil (Pati)', '{"camera_id": 2, "enabled": true, "x": 0.14, "y": 0.14, "width": 0.74, "height": 0.66, "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)", "show_grid": true, "show_telemetry": true, "show_scrim": true}'::jsonb)
+                ON CONFLICT DO NOTHING;
+            """, (os.getenv("CCTV_KEBONAGUNG_RTSP_URL", ""), os.getenv("CCTV_TRANGKIL_RTSP_URL", "")))
+            cursor.execute("SELECT setval(pg_get_serial_sequence('ai_cameras','id'), GREATEST(COALESCE((SELECT MAX(id) FROM ai_cameras),1), (SELECT last_value FROM ai_cameras_id_seq)))")
 
             # Seed Default AI Model if empty (Keras model uploaded by user)
             cursor.execute("""

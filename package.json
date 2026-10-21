@@ -5,8 +5,7 @@
   "workspaces": [
     "apps/api",
     "apps/web",
-    "apps/desktop",
-    "packages/contracts"
+    "apps/desktop"
   ],
   "scripts": {
     "dev": "npm run dev:web",
@@ -16,11 +15,10 @@
     "dev:frontend": "npm run dev -w @sugarcane/web",
     "dev:ai": "python -m uvicorn main:app --app-dir apps/ai-service --host 127.0.0.1 --port 8010 --reload",
     "dev:desktop": "npm run dev -w @sugarcane/desktop",
-    "build": "npm run build -w @sugarcane/contracts && npm run build -w @sugarcane/api && npm run build -w @sugarcane/web && npm run build -w @sugarcane/desktop",
+    "dev:dekstop": "npm run dev:desktop",
+    "build": "npm run build -w @sugarcane/api && npm run build -w @sugarcane/web && npm run build -w @sugarcane/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "node --import tsx --test tests/tapping.test.ts tests/web-api.test.ts tests/web-store.test.ts tests/grade-data.test.ts",
-    "test:integration": "node --import tsx --test tests/api.integration.test.ts tests/capture-sync.test.ts",
-    "test:ai": "python -m unittest discover -s tests -p test_ai.py -v",
+    "check:ready": "node scripts/check-ready.mjs",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:migrate": "npm run db:migrate -w @sugarcane/api"

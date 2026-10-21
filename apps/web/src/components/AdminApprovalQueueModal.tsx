@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ShieldCheck, CheckCircle2, XCircle, Clock, AlertTriangle, Eye, X, MessageSquare, History, FileCheck } from "lucide-react";
+import { ShieldCheck, CheckCircle2, XCircle, Clock, AlertTriangle, Eye, X, History, FileCheck } from "lucide-react";
 import { useAppStore } from "../store";
 import type { DeletionRequest } from "../types";
 
@@ -9,7 +9,6 @@ interface AdminApprovalQueueModalProps {
 }
 
 export function AdminApprovalQueueModal({ isOpen, onClose }: AdminApprovalQueueModalProps) {
-  const session = useAppStore(s => s.session);
   const deletionRequests = useAppStore(s => s.deletionRequests);
   const reviewDeletionRequest = useAppStore(s => s.reviewDeletionRequest);
 
@@ -30,7 +29,7 @@ export function AdminApprovalQueueModal({ isOpen, onClose }: AdminApprovalQueueM
 
     try {
       const note = reviewNotes[request.id]?.trim();
-      const res = await reviewDeletionRequest(request.id, decision, note);
+      await reviewDeletionRequest(request.id, decision, note);
 
       setActionFeedback({
         id: request.id,

@@ -16987,3 +16987,38 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
 @media (min-width:1201px) and (prefers-reduced-motion:reduce) {
   .shell .sidebar, .shell .sidebar::after, .shell .sidebar * { transition: none !important; }
 }
+
+/* Reset fixed desktop drawer dimensions when the viewport becomes a phone. */
+@media (max-width:900px) {
+  .shell .sidebar, .shell .sidebar *, .shell > main { transition:none !important; }
+  .shell.sidebar-collapsed > main, .shell.sidebar-expanded > main {
+    margin-left:0 !important;
+    width:100% !important;
+  }
+  .shell .sidebar {
+    width:100vw !important;
+    min-width:0 !important;
+    max-width:none !important;
+    clip-path:none !important;
+  }
+  .shell .sidebar .sidebarNav {
+    width:auto !important;
+    min-width:0 !important;
+    flex:1 1 0 !important;
+  }
+  .shell .sidebar .sidebarNavBtn, .shell .sidebar .sidebarLogout {
+    width:0 !important;
+    min-width:0 !important;
+    max-width:none !important;
+    flex:1 1 0 !important;
+    clip-path:none !important;
+    margin:0 !important;
+    padding:5px 2px !important;
+  }
+  .shell .sidebar .sidebarFooter {
+    width:44px !important;
+    min-width:44px !important;
+    flex:0 0 44px !important;
+  }
+  .shell .sidebar .sidebarLogout { width:100% !important; }
+}

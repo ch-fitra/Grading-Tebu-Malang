@@ -36,9 +36,9 @@ class ApiClient {
             if (body != null) 'Content-Type': 'application/json',
           })
           ..body = body == null ? '' : jsonEncode(body),
-      ).timeout(const Duration(seconds: 20));
+      ).timeout(Duration(seconds: method == 'GET' ? 20 : 65));
       final raw = await http.Response.fromStream(response)
-          .timeout(const Duration(seconds: 20));
+          .timeout(Duration(seconds: method == 'GET' ? 20 : 65));
       final decoded = raw.body.isEmpty ? null : jsonDecode(raw.body);
       if (raw.statusCode >= 400) {
         throw ApiFailure(
@@ -289,22 +289,22 @@ class AppState extends ChangeNotifier {
     final uri = Uri.tryParse(normalized);
     if (uri == null ||
         !['http', 'https'].contains(uri.scheme) ||
-        uri.host.isEmpty) {
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
       throw const ApiFailure(
         'Masukkan URL http:// atau https:// yang valid.',
         0,
       );
     }
-    _connectionVersion++;
-    _refreshVersion++;
-    _retryTimer?.cancel();
+    if (normalized == api.baseUrl) return;
+    // Sessions belong to one backend. Never send a previous server's token
+    // to an address entered in settings.
+    await logout();
     api.baseUrl = normalized;
     await storage.write(key: 'api_url', value: normalized);
     socket?.close();
-    if (signedIn) {
-      await refresh();
-      _connectSocket();
-    }
     notifyListeners();
   }
 

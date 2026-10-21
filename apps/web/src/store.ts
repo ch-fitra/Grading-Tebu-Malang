@@ -87,6 +87,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = { ...current, user };
       localStorage.setItem("tebu-session", JSON.stringify(session));
       set({ session });
+      await get().refresh();
     } catch (error) {
       if (error instanceof ApiError && error.status === 401 && get().session?.token === current.token) get().logout();
     }
@@ -112,7 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     ]);
     // A response may finish after the next poll starts. Apply completed responses
     // in order, rather than discarding every response on a slower connection.
-    if (get().session?.token !== current.token || version < appliedRefreshVersion) return;
+    if (get().session !== current || version < appliedRefreshVersion) return;
     appliedRefreshVersion = version;
     const trucks = [...(backendTrucks ?? get().truckSessions.filter(item => !item.id.startsWith("session_"))), ...legacySessions()];
     set({
@@ -120,7 +121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       history: history ?? get().history,
       cameras: cameras ?? get().cameras,
       models: models ?? get().models,
-      status: status === undefined ? get().status : status,
+      status: status === undefined ? { backend: { status: "offline" }, ai: { status: "offline" }, database: { status: "unknown" }, websocket: { clients: 0 } } : status,
       truckSessions: trucks,
       activeTruckSession: trucks.find(item => item.status === "active") ?? null,
       deletionRequests: deletionRequests ?? get().deletionRequests

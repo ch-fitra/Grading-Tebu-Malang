@@ -6,7 +6,7 @@ import type { ClassPercentages, Grade } from "./rule-engine.js";
 
 export type Camera = { id: number; name: string; rtspUrl: string; location: string; status: "online" | "offline"; createdAt: string };
 export type AiModel = { id: number; name: string; version: string; path: string; active: boolean; createdAt: string };
-export type InferenceResult = { id: number; timestamp: string; cameraId: number; classes: Required<Pick<ClassPercentages, "daun" | "pucuk" | "sampah">>; classScores?: Partial<Record<Grade, number>>; grade: Grade; confidence: number; snapshot: string | null };
+export type InferenceResult = { id: number; timestamp: string; cameraId: number; classes: Required<Pick<ClassPercentages, "daun" | "pucuk" | "sampah">>; impurityMeasured?: boolean; classScores?: Partial<Record<Grade, number>>; grade: Grade; confidence: number; snapshot: string | null };
 export type DeletionRequest = {
   id: string;
   targetType: "inference" | "truck_inspection" | "all_inferences";
@@ -27,19 +27,21 @@ export type DeletionRequest = {
 
 const cameraRow = (r: Record<string, unknown>): Camera => ({ id: Number(r.id), name: String(r.name), rtspUrl: String(r.rtsp_url), location: String(r.location ?? ""), status: r.status as Camera["status"], createdAt: new Date(String(r.created_at)).toISOString() });
 const modelRow = (r: Record<string, unknown>): AiModel => ({ id: Number(r.id), name: String(r.name), version: String(r.version), path: String(r.path), active: Boolean(r.active), createdAt: new Date(String(r.created_at)).toISOString() });
-const inferenceRow = (r: Record<string, unknown>): InferenceResult => ({ id: Number(r.id), timestamp: new Date(String(r.created_at)).toISOString(), cameraId: Number(r.camera_id ?? 0), classes: { daun: Number(r.daun_percent), pucuk: Number(r.pucuk_percent), sampah: Number(r.sampah_percent) }, grade: r.grade as Grade, confidence: Number(r.confidence), snapshot: r.snapshot_path ? String(r.snapshot_path) : null });
+const inferenceRow = (r: Record<string, unknown>): InferenceResult => ({ id: Number(r.id), timestamp: new Date(String(r.created_at)).toISOString(), cameraId: Number(r.camera_id ?? 0), classes: { daun: Number(r.daun_percent), pucuk: Number(r.pucuk_percent), sampah: Number(r.sampah_percent) }, impurityMeasured: r.impurity_measured === true, grade: r.grade as Grade, confidence: Number(r.confidence), snapshot: r.snapshot_path ? String(r.snapshot_path) : null });
 
 // Read the model's persisted class without rewriting historical or AI records.
-const aiPool = process.env.AI_DATABASE_URL ? new pg.Pool({ connectionString: process.env.AI_DATABASE_URL, allowExitOnIdle: true }) : null;
+const aiPool = process.env.AI_DATABASE_URL ? new pg.Pool({ connectionString: process.env.AI_DATABASE_URL, allowExitOnIdle: true, connectionTimeoutMillis: 5000, query_timeout: 10000 }) : null;
+aiPool?.on("error", () => console.error("Koneksi database AI terputus; riwayat tersimpan tetap tersedia"));
 async function withDetectedClasses(rows: InferenceResult[]): Promise<InferenceResult[]> {
   if (!aiPool || !rows.length) return rows;
   const paths = rows.flatMap(r => r.snapshot ? [r.snapshot.replace(/^\/+/, "")] : []);
-  const result = await aiPool.query("SELECT DISTINCT ON (snapshot_path) snapshot_path, detected_class, classes_score FROM ai_inference_results WHERE snapshot_path = ANY($1::text[]) ORDER BY snapshot_path, id DESC", [paths]);
+  const result = await aiPool.query("SELECT DISTINCT ON (snapshot_path) snapshot_path, detected_class, classes_score FROM ai_inference_results WHERE snapshot_path = ANY($1::text[]) ORDER BY snapshot_path, id DESC", [paths]).catch(() => null);
+  if (!result) return rows;
   const byPath = new Map(result.rows.map(r => [r.snapshot_path, r]));
   return rows.map(row => {
     const detection = byPath.get(row.snapshot?.replace(/^\/+/, ""));
     return detection && ["S", "M", "A", "D", "B", "T", "G", "X"].includes(detection.detected_class)
-      ? { ...row, grade: detection.detected_class as Grade, classScores: detection.classes_score }
+      ? { ...row, grade: detection.detected_class as Grade, classScores: Object.keys(detection.classes_score ?? {}).some(code => ["daun", "pucuk", "sampah"].includes(code)) ? undefined : detection.classes_score }
       : row;
   });
 }
@@ -115,7 +117,8 @@ export const store = {
         let inferenceId = found.rows[0]?.id;
         if (!inferenceId) {
           const scores = frame.classes_score;
-          const added = await client.query("INSERT INTO inference_results(camera_id,grade,daun_percent,pucuk_percent,sampah_percent,confidence,snapshot_path,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id", [frame.camera_id, frame.detected_class, scores.A ?? 0, scores.B ?? 0, scores.T ?? 0, frame.confidence, snapshot, frame.created_at]);
+          const measured = ["daun", "pucuk", "sampah"].every(code => typeof scores?.[code] === "number");
+          const added = await client.query("INSERT INTO inference_results(camera_id,grade,daun_percent,pucuk_percent,sampah_percent,confidence,snapshot_path,created_at,impurity_measured) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id", [frame.camera_id, frame.detected_class, measured ? scores.daun : 0, measured ? scores.pucuk : 0, measured ? scores.sampah : 0, frame.confidence, snapshot, frame.created_at, measured]);
           inferenceId = added.rows[0].id;
           imported++;
         }
@@ -128,12 +131,8 @@ export const store = {
     });
   },
   async listModelFrames(): Promise<InferenceResult[]> {
-    if (!aiPool) return [];
-    const result = await aiPool.query("SELECT id, camera_id, created_at, detected_class, classes_score, confidence, snapshot_path FROM ai_inference_results ORDER BY created_at DESC LIMIT 5000");
-    return result.rows.map(r => ({ id: Number(r.id), cameraId: Number(r.camera_id),
-      timestamp: new Date(r.created_at).toISOString(), grade: r.detected_class as Grade,
-      classScores: r.classes_score, classes: { daun: Number(r.classes_score.A ?? 0), pucuk: Number(r.classes_score.B ?? 0), sampah: Number(r.classes_score.T ?? 0) },
-      confidence: Number(r.confidence), snapshot: r.snapshot_path ? `/${r.snapshot_path}` : null }));
+    const result = await pool.query("SELECT * FROM inference_results ORDER BY created_at DESC LIMIT 5000");
+    return withDetectedClasses(result.rows.map(inferenceRow));
   },
   async latestInference() {
     const result = await pool.query("SELECT * FROM inference_results ORDER BY created_at DESC LIMIT 1");
@@ -151,8 +150,8 @@ export const store = {
       await client.query("SELECT last_ai_id FROM ai_capture_sync WHERE id=1 FOR UPDATE");
       const existing = await client.query("SELECT * FROM inference_results WHERE snapshot_path=$1 AND camera_id=$2 LIMIT 1", [result.snapshot,result.cameraId]);
       if (existing.rowCount) return inferenceRow(existing.rows[0]);
-      const sql = "INSERT INTO inference_results(camera_id,grade,daun_percent,pucuk_percent,sampah_percent,confidence,snapshot_path,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *";
-      return inferenceRow((await client.query(sql, [result.cameraId, result.grade, result.classes.daun, result.classes.pucuk, result.classes.sampah, result.confidence, result.snapshot, result.timestamp])).rows[0]);
+      const sql = "INSERT INTO inference_results(camera_id,grade,daun_percent,pucuk_percent,sampah_percent,confidence,snapshot_path,created_at,impurity_measured) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *";
+      return inferenceRow((await client.query(sql, [result.cameraId, result.grade, result.classes.daun, result.classes.pucuk, result.classes.sampah, result.confidence, result.snapshot, result.timestamp, result.impurityMeasured === true])).rows[0]);
     });
     return (await withDetectedClasses([row]))[0];
   },
@@ -182,7 +181,11 @@ export const store = {
       if (record.status !== "pending") throw Object.assign(new Error("Permohonan sudah ditinjau"), { statusCode: 409 });
       if (decision === "approved") {
         if (record.targetType === "inference") await client.query("DELETE FROM inference_results WHERE id=$1", [Number(record.targetId)]);
-        if (record.targetType === "truck_inspection") await client.query("DELETE FROM truck_inspections WHERE id=$1", [record.targetId]);
+        if (record.targetType === "truck_inspection") {
+          const target = await client.query("SELECT status FROM truck_inspections WHERE id=$1 FOR UPDATE", [record.targetId]);
+          if (target.rows[0]?.status === "active") throw Object.assign(new Error("Hentikan inspeksi aktif sebelum menyetujui penghapusan"), { statusCode: 409 });
+          await client.query("DELETE FROM truck_inspections WHERE id=$1", [record.targetId]);
+        }
         if (record.targetType === "all_inferences") {
           if (record.factory === "all") await client.query("DELETE FROM inference_results");
           else await client.query("DELETE FROM inference_results WHERE camera_id IN (SELECT id FROM cameras WHERE lower(name || ' ' || location) ~ $1)", [record.factory === "trangkil" ? "trangkil" : "kebon agung|malang"]);

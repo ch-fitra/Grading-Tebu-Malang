@@ -20,7 +20,7 @@ export interface TrangkilGradeItem {
   grad: string;
   kriteria: string;
   decision: string;
-  tier: "bebas" | "rafaksi" | "tolak";
+  tier: "bebas" | "rafaksi" | "tolak" | "manual";
   variasi: GradeVariationLine[];
 }
 
@@ -131,15 +131,15 @@ export const TRANGKIL_GRADES: TrangkilGradeItem[] = [
     ]
   },
   {
-    code: "T", label: "MBS T", name: "Belum ditetapkan",
-    tol: "Belum ditetapkan", rafaksi: "Belum ditetapkan", status: "Hasil Deteksi T",
+    code: "T", label: "MBS T", name: "Menunggu keputusan QC manual",
+    tol: "Ditinjau QC", rafaksi: "Ditentukan QC", status: "Perlu keputusan QC",
     statusCls: "t", badgeCls: "badge-t", img: "/grades/mbs-t.png",
     color: "#9333ea", grad: "linear-gradient(90deg, #9333ea, #c084fc)",
-    kriteria: "Kelas T sesuai hasil model dan database. Aturan toleransi dan rafaksi belum ditetapkan.",
-    decision: "Belum ditetapkan", tier: "rafaksi",
+    kriteria: "Kelas T sesuai hasil model dan database. Keputusan giling dan rafaksi menunggu peninjauan QC secara manual.",
+    decision: "Menunggu keputusan QC manual", tier: "manual",
     variasi: [{ label: "Kelas Model", value: "T", status: "warn" },
-      { label: "Toleransi", value: "Belum ditetapkan", status: "warn" },
-      { label: "Rafaksi", value: "Belum ditetapkan", status: "warn" }]
+      { label: "Toleransi", value: "Ditinjau QC", status: "warn" },
+      { label: "Rafaksi", value: "Ditentukan QC", status: "warn" }]
   },
   {
     code: "G",

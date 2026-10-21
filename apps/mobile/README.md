@@ -43,7 +43,6 @@ HTTP/cleartext diizinkan pada build Android debug dan scaffold iOS untuk pengemb
 - `lib/main.dart`: bootstrap, tema, dan navigasi adaptif.
 - `lib/ui/common.dart`: komponen/tampilan bersama.
 - `lib/features/{auth,dashboard,history,trucks,cameras,models,access,settings}/`: halaman dan aksi per domain.
-- `test/widget_test.dart`: kontrak HTTP dan smoke test UI.
 - `android/`, `ios/`: project native hasil scaffold Flutter.
 
-Perintah pemeriksaan: `flutter analyze`, `flutter test`, `flutter build apk --debug`.
+Perintah pemeriksaan: `flutter analyze`, `flutter build apk --debug`.

@@ -1,6 +1,6 @@
 # Electron desktop client
 
-Electron displays the exact React UI used by `apps/web`, including the current login, dashboard, history, cameras, models, settings, theme, and Users & Roles screens. The desktop app does not run a second backend, AI service, or database. It connects to the same Fastify API as web and future Flutter clients.
+Electron displays the same React UI used by `apps/web`. All shared frontend changes belong in `apps/web/src`; `apps/desktop` contains only the Electron window, preload, configuration, and launch scripts. Both clients connect to the same backend services.
 
 ## Development on Windows
 
@@ -10,7 +10,9 @@ Start PostgreSQL and the shared API as described in the root README. AI service 
 npm run dev:desktop
 ```
 
-This command builds `apps/web`, compiles Electron, and opens the desktop window using the local built renderer. It does not require the Vite server. Re-run the command after changing React code; browser hot reload remains available through `npm run dev:web`.
+This command compiles Electron and opens the shared Vite UI at `http://127.0.0.1:5175`. It reuses this project's Vite server when one is already running, or starts one automatically. Saving React or CSS changes updates browser and desktop together without rebuilding. Restart this command after changing Electron code in `apps/desktop/src`.
+
+To run both clients, start `npm run dev:web` first, then `npm run dev:desktop` in another terminal. Closing desktop leaves a separately started web server running; a server started by desktop itself stops with desktop. The alias `npm run dev:dekstop` is also supported.
 
 By default, desktop connects to `http://127.0.0.1:4110`. To connect to a central API, set the runtime address before starting Electron:
 
@@ -27,12 +29,13 @@ Electron derives the WebSocket URL from that address (`https` becomes `wss`). Th
 npm run package -w @sugarcane/desktop -- --win
 ```
 
-The package includes the built React files under `resources/renderer`; an installed app does not require Vite or a local web server. Set `SUGARCANE_API_URL` in the environment used to launch the installed app to select a remote API. The fallback is the local API on port 4110. Database credentials and AI configuration belong to the shared backend deployment, not to Electron.
+The package includes the built React files under `resources/renderer`. Electron starts its own loopback HTTP server on an available port to serve these files and proxy API, snapshots and WebSocket traffic to the configured backend. No separate Vite or web-server installation is needed. This keeps login cookies, media and root-relative images working in the installed app. Set `SUGARCANE_API_URL` in the environment used to launch the installed app to select a remote API. The fallback is the local API on port 4110. Database credentials and AI configuration belong to the shared backend deployment, not to Electron.
 
 The current Windows build is unsigned for local testing. Before public distribution, configure a Windows signing certificate and executable metadata in `apps/desktop/package.json`.
 
 ## Troubleshooting
 
 - A connection message on login means the API cannot be reached; verify `/health` at the configured address.
-- If the window cannot find its UI files, rebuild the web app with `npm run build -w @sugarcane/web`.
+- If port 5175 belongs to another application or checkout, stop that process before starting desktop.
+- For direct Electron startup without Vite, build the web app first with `npm run build -w @sugarcane/web`. Installed applications always use their bundled renderer.
 - If AI is offline, the status shown in desktop is the same status returned by the shared API to the web client.

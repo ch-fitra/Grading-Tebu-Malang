@@ -7,7 +7,7 @@ type TruckRecord = {
   id: string; truckCode: string; plateNumber: string; driverName: string; supplier: string;
   line: number; status: string; finalDecision: string; averageImpurity: number;
   averageConfidence: number; totalCaptures: number; captureIds: number[]; notes: string;
-  startedAt: string; completedAt: string | null;
+  startedAt: string; completedAt: string | null; detectedGrade: string | null; impurityMeasured: boolean;
 };
 
 
@@ -26,7 +26,8 @@ async function read(id?: string, db: Queryable = pool): Promise<TruckRecord[]> {
   const result = await db.query(`SELECT t.*,
     COALESCE(array_agg(i.id ORDER BY i.created_at) FILTER (WHERE i.id IS NOT NULL), '{}') AS capture_ids,
     COUNT(i.id)::int AS total_captures,
-    COALESCE(AVG(i.daun_percent+i.pucuk_percent+i.sampah_percent),0)::float AS measured_impurity,
+    COALESCE(AVG(i.daun_percent+i.pucuk_percent+i.sampah_percent) FILTER (WHERE i.impurity_measured),0)::float AS measured_impurity,
+    BOOL_AND(i.impurity_measured IS TRUE) FILTER (WHERE i.id IS NOT NULL) AS impurity_measured,
     COALESCE(AVG(i.confidence),0)::float AS measured_confidence,
     COALESCE(array_agg(i.grade ORDER BY i.created_at DESC, i.id DESC) FILTER (WHERE i.id IS NOT NULL), '{}') AS detected_grades
     FROM truck_inspections t
@@ -44,6 +45,8 @@ async function read(id?: string, db: Queryable = pool): Promise<TruckRecord[]> {
       id: String(r.id), truckCode: String(r.truck_code), plateNumber: String(r.plate_number ?? ""),
       driverName: String(r.driver_name ?? ""), supplier: String(r.supplier ?? ""), line: Number(r.line),
       status: String(r.status), finalDecision: decision, averageImpurity: impurity,
+      detectedGrade: grade ?? null,
+      impurityMeasured: r.impurity_measured === true,
       averageConfidence: Number(r.measured_confidence), totalCaptures: count,
       captureIds: (r.capture_ids as unknown[]).map(Number), notes: String(r.notes ?? ""),
       startedAt: new Date(r.started_at).toISOString(),
@@ -93,11 +96,18 @@ export const trucks = {
       return results;
     });
   },
-  async delete(id: string) {
-    return Boolean((await pool.query("DELETE FROM truck_inspections WHERE id=$1", [id])).rowCount);
+  async delete(id: string, discardUnstarted = false) {
+    return transaction(async client => {
+      const found = await client.query("SELECT status FROM truck_inspections WHERE id=$1 FOR UPDATE", [id]);
+      if (!found.rowCount) return false;
+      if (found.rows[0].status === "active" && !discardUnstarted) throw Object.assign(new Error("Hentikan inspeksi aktif sebelum menghapusnya"), { statusCode: 409 });
+      return Boolean((await client.query("DELETE FROM truck_inspections WHERE id=$1", [id])).rowCount);
+    });
   },
   async clearAll(cameraIds?: number[]) {
-    await pool.query("DELETE FROM truck_inspections WHERE ($1::int[] IS NULL OR line=ANY($1))", [cameraIds ?? null]);
+    const active = await pool.query("SELECT 1 FROM truck_inspections WHERE status='active' AND ($1::int[] IS NULL OR line=ANY($1)) LIMIT 1", [cameraIds ?? null]);
+    if (active.rowCount) throw Object.assign(new Error("Hentikan inspeksi aktif sebelum menghapus semua siklus"), { statusCode: 409 });
+    await pool.query("DELETE FROM truck_inspections WHERE status='completed' AND ($1::int[] IS NULL OR line=ANY($1))", [cameraIds ?? null]);
     return true;
   }
 };

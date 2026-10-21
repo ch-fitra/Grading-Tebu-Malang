@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 import psycopg2
-from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("ai_db")
 

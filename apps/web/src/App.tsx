@@ -26,7 +26,7 @@ export default function App() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarSuppressedRef = useRef(false);
-  const { session, refresh, logout, validateSession } = useAppStore();
+  const { session, status, refresh, logout, validateSession } = useAppStore();
   const permissions = session?.user.permissions ?? [];
 
   const closeSidebar = useCallback(() => {
@@ -79,13 +79,36 @@ export default function App() {
     if (!session) return;
     refresh();
     const timer = window.setInterval(refresh, 5000);
-    const ws = new WebSocket(`${websocketUrl}?token=${encodeURIComponent(session.token)}`);
-    ws.onmessage = () => refresh();
-    return () => {
-      window.clearInterval(timer);
-      ws.close();
+    let ws: WebSocket | undefined;
+    let retry: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    let attempts = 0;
+    const connect = () => {
+      if (stopped) return;
+      try {
+        const address = new URL(websocketUrl);
+        address.searchParams.set("token", session.token);
+        ws = new WebSocket(address);
+        ws.onopen = () => { attempts = 0; void refresh(); };
+        ws.onmessage = () => { void refresh(); };
+        ws.onclose = event => {
+          if (stopped) return;
+          if (event.code === 1008) { void validateSession(); return; }
+          retry = setTimeout(connect, Math.min(10000, 1000 * 2 ** Math.min(attempts++, 4)));
+        };
+        ws.onerror = () => ws?.close();
+      } catch {
+        retry = setTimeout(connect, 5000);
+      }
     };
-  }, [refresh, session?.token]);
+    connect();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      clearTimeout(retry);
+      ws?.close();
+    };
+  }, [refresh, session?.token, validateSession]);
 
   if (!session) {
     return (
@@ -96,6 +119,7 @@ export default function App() {
     );
   }
 
+  const roleLabel = session.user.role === "admin" ? "Direksi (Admin)" : session.user.role === "operator" ? "Operator Meja" : session.user.role === "developer" ? "Developer" : session.user.role;
   const userFactory = (() => {
     const u = (session?.user.username || "").toLowerCase();
     if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
@@ -152,7 +176,7 @@ export default function App() {
             </div>
             <span className="brandSubtitle">{factoryBrand.subtitle}</span>
             <span className="brandStatusTag">
-              <span className="statusDotLive"></span> Online • MBS Active
+              <span className="statusDotLive"></span> {status?.backend.status === "ok" ? "Online" : "Offline"} • Tebu AI
             </span>
           </div>
         </div>
@@ -190,7 +214,7 @@ export default function App() {
         <div 
           className="sidebarUserCard" 
           title={`Login sebagai ${session.user.username} (${session.user.role})`}
-          data-tooltip={`${session.user.username} (${session.user.role === "admin" ? "Direksi" : session.user.role === "operator" ? "Operator" : "Dev"})`}
+          data-tooltip={`${session.user.username} (${roleLabel})`}
         >
           <div className={`sidebarUserAvatar ${session.user.role === "admin" ? "admin" : session.user.role === "operator" ? "operator" : "dev"}`}>
             {session.user.role === "admin" ? <Crown size={16} /> : session.user.role === "operator" ? <Activity size={16} /> : <Shield size={16} />}
@@ -201,7 +225,7 @@ export default function App() {
               <span className="sidebarLivePulseDot" title="Sesi Terhubung Aktif" />
             </div>
             <span className={`sidebarUserRoleTag ${session.user.role === "admin" ? "admin" : session.user.role === "operator" ? "operator" : "dev"}`}>
-              {session.user.role === "admin" ? "👑 Direksi (Admin)" : session.user.role === "operator" ? "⚙️ Operator Meja" : "🛠️ Developer"}
+              {roleLabel}
             </span>
           </div>
         </div>
@@ -224,6 +248,7 @@ export default function App() {
         </div>
       </aside>
       <main className={(tab === "dashboard" || tab === "guide" || tab === "history") ? "dashboardMainFixed" : ""}>
+        {!permissions.some(permission => ["dashboard.read", "history.read", "user.read"].includes(permission)) && <p role="status">Akun ini belum memiliki akses halaman. Hubungi administrator untuk mengatur hak akses.</p>}
         {tab === "dashboard" && permissions.includes("dashboard.read") && <DashboardPage />}
         {tab === "guide" && permissions.includes("dashboard.read") && <QualityGuidePage />}
         {tab === "history" && permissions.includes("history.read") && <HistoryPage />}

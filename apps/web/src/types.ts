@@ -1,6 +1,7 @@
 export type Grade = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 
 export type InferenceResult = {
+  impurityMeasured?: boolean;
   conveyorEmpty?: boolean;
   id: number;
   timestamp: string;
@@ -38,6 +39,7 @@ export type SystemStatus = {
 export type TruckDecision = "MBS" | "NON_MBS" | "DITOLAK_DO" | "PENDING";
 
 export type TruckInspectionSession = {
+  impurityMeasured?: boolean;
   id: string;
   truckCode: string;
   plateNumber?: string;
@@ -49,6 +51,7 @@ export type TruckInspectionSession = {
   completedAt?: string;
   captureIds: number[];
   finalDecision: TruckDecision;
+  detectedGrade?: Grade | null;
   averageImpurity: number;
   averageConfidence: number;
   totalCaptures: number;

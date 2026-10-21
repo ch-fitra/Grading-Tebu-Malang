@@ -79,17 +79,6 @@ export interface FileImportStats {
   unassignedMeja: number;
 }
 
-// Helper to determine AI Grade from average impurity percent
-export function getAiGrade(impurity: number): string {
-  if (impurity <= 2) return "S";
-  if (impurity <= 5) return "M";
-  if (impurity <= 10) return "A";
-  if (impurity <= 15) return "D";
-  if (impurity <= 20) return "B";
-  if (impurity <= 35) return "G";
-  return "X";
-}
-
 // Excel serials represent wall-clock dates, not UTC instants.
 export function parseTrangkilDate(raw: unknown, fallbackDate?: Date, date1904 = false): Date | null {
   if (raw instanceof Date) return Number.isFinite(raw.getTime()) ? raw : null;

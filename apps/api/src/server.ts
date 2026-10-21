@@ -2,10 +2,10 @@ import "./env.js";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
-import Fastify, { type FastifyRequest, type FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
+import Fastify, { type FastifyReply } from "fastify";
+import { createHmac, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, unlink, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,26 @@ import { trucks } from "./trucks.js";
 import { calculateGrade } from "./rule-engine.js";
 import { pool } from "./db.js";
 
-const app = Fastify({ logger: process.env.API_TEST_MODE === "true" ? false : { redact: { paths: ["req.url"], censor: "[redacted]" } } });
+const app = Fastify({ logger: { redact: { paths: ["req.url"], censor: "[redacted]" } } });
+app.setErrorHandler((error, _request, reply) => {
+  const failure = error as Error & { statusCode?: number; code?: string };
+  const conflict = failure.code === "23505" || failure.code === "23503";
+  const status = conflict ? 409 : failure.statusCode && failure.statusCode >= 400 && failure.statusCode <= 599 ? failure.statusCode : 500;
+  if (status >= 500) app.log.error(error);
+  return reply.code(status).send({ message: conflict ? "Data sudah digunakan atau masih dirujuk data lain" : status >= 500 ? "Terjadi kesalahan layanan. Silakan coba kembali atau hubungi administrator." : failure.message });
+});
+const aiServiceHeaders = { "X-Sugarcane-Service-Token": process.env.AI_SERVICE_TOKEN ?? createHmac("sha256", process.env.JWT_SECRET ?? "local-development-secret-change-me").update("sugarcane-ai-service").digest("hex") };
+const credentialAttempts = new Map<string, { count: number; until: number }>();
+function allowCredentialAttempt(key: string) {
+  const now = Date.now();
+  if (credentialAttempts.size >= 10000) for (const [name, value] of credentialAttempts) if (value.until <= now) credentialAttempts.delete(name);
+  const previous = credentialAttempts.get(key);
+  const attempt = !previous || previous.until <= now ? { count: 0, until: now + 60000 } : previous;
+  if (attempt.count >= 8 || (!previous && credentialAttempts.size >= 10000)) return false;
+  attempt.count++;
+  credentialAttempts.set(key, attempt);
+  return true;
+}
 const clients = new Set<{ send: (payload: string) => void }>();
 app.addHook("onClose", async () => { await pool.end(); });
 
@@ -32,6 +51,8 @@ await app.register(websocket);
 
 const access: Record<string, Permission> = {
   "GET /api/system/status": "dashboard.read", "GET /api/cameras": "camera.read", "POST /api/cameras": "camera.write",
+  "GET /api/ai/inference/history-summary": "history.read", "GET /api/ai/inference/history-page": "dashboard.read",
+  "GET /api/ai/cycle/auto/:id": "dashboard.read", "PUT /api/ai/cycle/auto/:id": "inspection.write",
   "PUT /api/cameras/:id": "camera.write", "DELETE /api/cameras/:id": "camera.write", "GET /api/models": "model.read",
   "POST /api/models/upload": "model.write", "POST /api/models/activate": "model.write",
   "GET /api/inference/latest": "dashboard.read", "GET /api/inference/history": "history.read", "GET /api/inference/model-frames": "dashboard.read",
@@ -68,8 +89,8 @@ app.addHook("preHandler", async (request, reply) => {
       const mediaParams = request.params as { id?: string; "*"?: string };
       if (mediaParams.id && !cameras.some(camera => camera.id === Number(mediaParams.id))) return reply.code(403).send({ message: "Kamera berada di luar akses pabrik" });
       if (mediaParams["*"]) {
-        const records = await store.listInference();
-        if (!records.some(record => record.snapshot === `/storage/snapshots/${mediaParams["*"]}` && cameras.some(camera => camera.id === record.cameraId))) return reply.code(403).send({ message: "Snapshot berada di luar akses pabrik" });
+        const record = await pool.query("SELECT 1 FROM inference_results WHERE snapshot_path=$1 AND camera_id=ANY($2::bigint[]) LIMIT 1", [`/storage/snapshots/${mediaParams["*"]}`, cameras.map(camera => camera.id)]);
+        if (!record.rowCount) return reply.code(403).send({ message: "Snapshot berada di luar akses pabrik" });
       }
     }
     return;
@@ -135,16 +156,22 @@ app.addHook("preHandler", async (request, reply) => {
   }
 });
 
-function broadcast(event: string, data: unknown) {
-  const payload = JSON.stringify({ event, data });
+function broadcast(event: string, _data: unknown) {
+  // Clients refresh through factory-filtered HTTP endpoints. Never broadcast
+  // camera credentials, captures or deletion requests to other factories.
+  const payload = JSON.stringify({ event });
   for (const client of clients) {
-    client.send(payload);
+    try { client.send(payload); } catch { clients.delete(client); }
   }
 }
 
-app.get("/health", async () => ({ status: "ok", service: "backend" }));
+app.get("/health", async (_request, reply) => {
+  try { await pool.query("SELECT 1"); return { status: "ok", service: "backend" }; }
+  catch { return reply.code(503).send({ status: "degraded", service: "backend", message: "Database tidak tersedia" }); }
+});
 
 const snapshotsDir = fileURLToPath(new URL("../../../storage/snapshots/", import.meta.url));
+const aiSnapshotsDir = process.env.AI_SNAPSHOTS_DIR ?? fileURLToPath(new URL("../../ai-service/storage/snapshots/", import.meta.url));
 
 // Serve saved snapshot images
 app.get("/storage/snapshots/*", async (request, reply) => {
@@ -152,9 +179,9 @@ app.get("/storage/snapshots/*", async (request, reply) => {
   if (!safeName || safeName.split("/").some(part => !/^[a-zA-Z0-9_.-]+$/.test(part) || part === "." || part === "..")) return reply.code(400).send({ message: "Invalid snapshot path" });
   const filePath = join(snapshotsDir, safeName);
   try {
-    const file = await readFile(filePath).catch(() => readFile(fileURLToPath(new URL(`../../ai-service/storage/snapshots/${safeName}`, import.meta.url))));
+    const file = await readFile(filePath).catch(() => readFile(join(aiSnapshotsDir, safeName)));
     reply.header("Content-Type", "image/jpeg");
-    reply.header("Cache-Control", "public, max-age=86400");
+    reply.header("Cache-Control", "private, no-store");
     return reply.send(file);
   } catch {
     return reply.code(404).send({ message: "Snapshot image not found" });
@@ -163,14 +190,16 @@ app.get("/storage/snapshots/*", async (request, reply) => {
 
 app.post("/api/auth/login", async (request, reply) => {
   const parsed = z.object({
-    username: z.string().min(1),
-    password: z.string().min(1)
+    username: z.string().trim().min(1).max(100),
+    password: z.string().min(1).max(128)
   }).safeParse(request.body);
 
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-
+  const key = `login:${request.ip}:${parsed.data.username}`;
+  if (!allowCredentialAttempt(key)) return reply.header("Retry-After", "60").code(429).send({ message: "Terlalu banyak percobaan login. Tunggu satu menit lalu coba kembali." });
   const session = await auth.login(parsed.data.username, parsed.data.password);
   if (!session) return reply.code(401).send({ message: "Username atau password salah" });
+  credentialAttempts.delete(key);
   const secure = request.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
   reply.header("Set-Cookie", `sugarcane_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=28800${secure}`);
   return session;
@@ -272,15 +301,18 @@ app.patch("/api/users/:id", async (request, reply) => {
 // Endpoint Verifikasi Persetujuan 2FA Direksi / Admin
 app.post("/api/auth/verify-admin", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
-  const body = (request.body as { password?: string; reason?: string }) ?? {};
-  if (!body.password) {
+  const parsed = z.object({ password: z.string().min(1).max(128) }).safeParse(request.body);
+  if (!parsed.success) {
     return reply.code(400).send({ message: "Password atau PIN Otorisasi Direksi wajib diisi" });
   }
+  const key = `approval:${actor.id}`;
+  if (!allowCredentialAttempt(key)) return reply.header("Retry-After", "60").code(429).send({ message: "Terlalu banyak percobaan otorisasi. Tunggu satu menit." });
   const factory = getFactoryFilter(actor.username);
-  const admin = await auth.verifyAdmin(factory, body.password);
+  const admin = await auth.verifyAdmin(factory, parsed.data.password);
   if (!admin) {
     return reply.code(401).send({ message: "Password / PIN Otorisasi Direksi tidak valid" });
   }
+  credentialAttempts.delete(key);
   return {
     ok: true,
     admin: {
@@ -293,7 +325,7 @@ app.post("/api/auth/verify-admin", async (request, reply) => {
 });
 
 // Helper Otorisasi Penghapusan: Operator dilarang menghapus langsung, wajib melalui permohonan persetujuan Direksi
-async function checkAdminApproval(request: FastifyRequest, actor: User, reply: FastifyReply): Promise<boolean> {
+async function checkAdminApproval(actor: User, reply: FastifyReply): Promise<boolean> {
   if (actor.role === "admin" || actor.role === "developer") {
     return true; // Direksi / Developer memiliki otoritas langsung
   }
@@ -405,18 +437,51 @@ app.get("/api/system/status", async () => {
     ai = { status: "offline" };
   }
 
+  let database = "ok";
+  try { await pool.query("SELECT 1"); } catch { database = "offline"; }
   return {
     backend: { status: "ok" },
     ai,
-    database: { status: store.databaseStatus() === "postgresql" ? "ok" : "dev-memory" },
+    database: { status: database },
     websocket: { clients: clients.size }
   };
 });
 
+for (const [method, route, upstreamPath] of [
+  ["GET", "/api/ai/inference/history-summary", "/inference/history-summary"],
+  ["GET", "/api/ai/inference/history-page", "/inference/history-page"],
+  ["GET", "/api/ai/cycle/auto/:id", "/cycle/auto/:id"],
+  ["PUT", "/api/ai/cycle/auto/:id", "/cycle/auto/:id"]
+] as const) {
+  app.route({ method, url: route, handler: async (request, reply) => {
+    const id = (request.params as { id?: string }).id;
+    if (id && !z.coerce.number().int().positive().safeParse(id).success) return reply.code(400).send({ message: "ID kamera tidak valid" });
+    if (id) {
+      const actor = (await currentUser(request.headers.authorization))!;
+      if (method === "PUT" && actor.role === "admin") return reply.code(403).send({ message: "Kontrol Auto hanya untuk operator lapangan" });
+      const allowed = await factoryCameraIds(actor);
+      if (allowed && !allowed.includes(Number(id))) return reply.code(403).send({ message: "Kamera berada di luar akses pabrik" });
+    }
+    const query = request.url.includes("?") ? request.url.slice(request.url.indexOf("?")) : "";
+    try {
+      const upstream = await fetch(`${config.aiServiceUrl}${upstreamPath.replace(":id", id ?? "")}${query}`, {
+        method,
+        headers: { ...aiServiceHeaders, Authorization: request.headers.authorization ?? "", "Content-Type": "application/json" },
+        ...(method === "PUT" ? { body: JSON.stringify(request.body) } : {}),
+        signal: AbortSignal.timeout(60000)
+      });
+      const body = await upstream.text();
+      return reply.code(upstream.status).type(upstream.headers.get("content-type") ?? "application/json").send(body);
+    } catch {
+      return reply.code(502).send({ message: "Layanan AI tidak dapat dihubungi; periksa status layanan AI" });
+    }
+  } });
+}
+
 const cameraSchema = z.object({
-  name: z.string().min(1),
-  rtspUrl: z.string().min(1),
-  location: z.string().default("")
+  name: z.string().trim().min(1).max(100),
+  rtspUrl: z.string().url().max(2000).regex(/^(rtsps?|https?):\/\//i),
+  location: z.string().max(100).default("")
 });
 
 app.get("/api/cameras", async (request) => {
@@ -445,7 +510,7 @@ app.post("/api/cameras", async (request, reply) => {
   // Register with Python streaming service
   fetch(`${config.aiServiceUrl}/cameras/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
     body: JSON.stringify({ camera_id: camera.id, rtsp_url: camera.rtspUrl, camera_name: camera.name })
   }).catch(() => {});
   broadcast("camera.created", camera);
@@ -461,7 +526,7 @@ app.put("/api/cameras/:id", async (request, reply) => {
   if (camera.rtspUrl) {
     fetch(`${config.aiServiceUrl}/cameras/register`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ camera_id: camera.id, rtsp_url: camera.rtspUrl, camera_name: camera.name })
     }).catch(() => {});
   }
@@ -471,6 +536,12 @@ app.put("/api/cameras/:id", async (request, reply) => {
 
 app.delete("/api/cameras/:id", async (request, reply) => {
   const id = Number((request.params as { id: string }).id);
+  if ((await trucks.list()).some(cycle => cycle.line === id && cycle.status === "active")) return reply.code(409).send({ message: "Hentikan inspeksi aktif sebelum menghapus kamera" });
+  if (!(await store.listCameras()).some(camera => camera.id === id)) return reply.code(404).send({ message: "Camera not found" });
+  try {
+    const stopped = await fetch(`${config.aiServiceUrl}/cameras/${id}`, { method: "DELETE", headers: aiServiceHeaders, signal: AbortSignal.timeout(10000) });
+    if (!stopped.ok) throw new Error("Camera did not stop");
+  } catch { return reply.code(502).send({ message: "Layanan AI belum berhasil menonaktifkan kamera; coba kembali" }); }
   if (!(await store.deleteCamera(id))) return reply.code(404).send({ message: "Camera not found" });
   broadcast("camera.deleted", { id });
   return { ok: true };
@@ -481,8 +552,12 @@ app.get("/api/cameras/:id/stream", async (request, reply) => {
   const { id } = request.params as { id: string };
   const query = request.raw.url?.split("?")[1] ?? "";
   const targetUrl = `${config.aiServiceUrl}/stream/${id}${query ? `?${query}` : ""}`;
+  const abort = new AbortController();
+  const startupTimeout = setTimeout(() => abort.abort(), 10000);
+  reply.raw.once("close", () => abort.abort());
   try {
-    const upstream = await fetch(targetUrl);
+    const upstream = await fetch(targetUrl, { headers: aiServiceHeaders, signal: abort.signal });
+    clearTimeout(startupTimeout);
     if (!upstream.ok || !upstream.body) {
       return reply.code(upstream.status).send({ message: "Stream tidak tersedia" });
     }
@@ -493,6 +568,8 @@ app.get("/api/cameras/:id/stream", async (request, reply) => {
     return reply.send(nodeStream);
   } catch {
     return reply.code(502).send({ message: "Gagal terhubung ke AI video stream service" });
+  } finally {
+    clearTimeout(startupTimeout);
   }
 });
 
@@ -500,7 +577,7 @@ app.get("/api/cameras/:id/stream", async (request, reply) => {
 app.post("/api/cameras/:id/reconnect", async (request, reply) => {
   const { id } = request.params as { id: string };
   try {
-    const upstream = await fetch(`${config.aiServiceUrl}/stream/${id}/reconnect`, { method: "POST", signal: AbortSignal.timeout(10000) });
+    const upstream = await fetch(`${config.aiServiceUrl}/stream/${id}/reconnect`, { method: "POST", headers: aiServiceHeaders, signal: AbortSignal.timeout(10000) });
     return reply.send({ ok: upstream.ok });
   } catch {
     return reply.send({ ok: false });
@@ -513,7 +590,7 @@ app.get("/api/cameras/:id/snapshot", async (request, reply) => {
   const query = request.raw.url?.split("?")[1] ?? "";
   const targetUrl = `${config.aiServiceUrl}/snapshot/${id}${query ? `?${query}` : ""}`;
   try {
-    const upstream = await fetch(targetUrl);
+    const upstream = await fetch(targetUrl, { headers: aiServiceHeaders, signal: AbortSignal.timeout(10000) });
     if (!upstream.ok) return reply.code(upstream.status).send({ message: "Snapshot tidak tersedia" });
     const buf = Buffer.from(await upstream.arrayBuffer());
     reply.header("Content-Type", "image/jpeg");
@@ -527,7 +604,7 @@ app.get("/api/cameras/:id/snapshot", async (request, reply) => {
 app.get("/api/cameras/:id/roi", async (request, reply) => {
   const { id } = request.params as { id: string };
   try {
-    const res = await fetch(`${config.aiServiceUrl}/roi/${id}`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${config.aiServiceUrl}/roi/${id}`, { headers: aiServiceHeaders, signal: AbortSignal.timeout(5000) });
     const data = await res.json();
     return reply.code(res.status).send(data);
   } catch {
@@ -540,7 +617,7 @@ app.post("/api/cameras/:id/roi", async (request, reply) => {
   try {
     const res = await fetch(`${config.aiServiceUrl}/roi/${id}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       body: JSON.stringify(request.body),
       signal: AbortSignal.timeout(5000)
     });
@@ -571,26 +648,29 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
   try {
     const aiRes = await fetch(`${config.aiServiceUrl}/infer`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(30000),
       body: JSON.stringify({ camera_id: id, crop_roi: true })
     });
 
     if (!aiRes.ok) return reply.code(502).send({ message: "Gagal memproses inferensi AI" });
-    const data = await aiRes.json() as {
-      classes: { daun?: number; pucuk?: number; sampah?: number; A?: number; B?: number; T?: number };
-      grade?: string;
-      detected_class?: string;
-      confidence: number;
-      snapshot_path: string;
-      timestamp: string;
-    };
+    const output = z.object({
+      impurity_measured: z.boolean().optional(),
+      classes: z.record(z.number().finite().min(0).max(100)),
+      grade: z.string().optional(),
+      detected_class: z.string().optional(),
+      confidence: z.number().finite().min(0).max(1),
+      snapshot_path: z.string().regex(/^storage\/snapshots\/[a-zA-Z0-9_/-]+\.jpg$/).refine(value => !value.includes("..")),
+      timestamp: z.string().datetime({ offset: true }),
+    }).safeParse(await aiRes.json());
+    if (!output.success) return reply.code(502).send({ message: "Format keluaran AI tidak valid" });
+    const data = output.data;
 
-    // Match the existing AI engine's A/B/T mapping used by its grading rule.
+    // Grade probabilities do not measure physical impurity.
     const classes = {
-      daun: data.classes.daun ?? data.classes.A,
-      pucuk: data.classes.pucuk ?? data.classes.B,
-      sampah: data.classes.sampah ?? data.classes.T,
+      daun: data.impurity_measured === true ? data.classes.daun : 0,
+      pucuk: data.impurity_measured === true ? data.classes.pucuk : 0,
+      sampah: data.impurity_measured === true ? data.classes.sampah : 0,
     };
     const validatedClasses = z.object({
       daun: z.number().finite().min(0).max(100),
@@ -598,11 +678,15 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
       sampah: z.number().finite().min(0).max(100),
     }).safeParse(classes);
     if (!validatedClasses.success) return reply.code(502).send({ message: "Format keluaran kelas AI tidak valid" });
-    const grade = data.detected_class && ["S", "M", "A", "D", "B", "T", "G", "X"].includes(data.detected_class)
-      ? data.detected_class as import("./rule-engine.js").Grade : calculateGrade(validatedClasses.data);
+    const gradeResult = z.enum(["S", "M", "A", "D", "B", "T", "G", "X"]).safeParse(
+      data.detected_class ?? data.grade ?? (data.impurity_measured ? calculateGrade(validatedClasses.data) : undefined)
+    );
+    if (!gradeResult.success) return reply.code(502).send({ message: "Kelas mutu keluaran AI tidak valid" });
+    const grade = gradeResult.data;
 
     const added = await store.addInference({
       cameraId: id,
+      impurityMeasured: data.impurity_measured === true,
       grade,
       classes: validatedClasses.data,
       confidence: data.confidence,
@@ -639,9 +723,13 @@ app.post("/api/models/upload", async (request, reply) => {
         if (part.file.truncated) throw new Error("File model melebihi 200 MB");
       }
     }
-    if (!name || !version || !path) {
+    if (!z.string().min(1).max(100).safeParse(name).success || !z.string().min(1).max(50).safeParse(version).success || !path) {
       if (path) await unlink(new URL(path.split("/").at(-1)!, archive)).catch(() => {});
       return reply.code(400).send({ message: "Nama, versi, dan file model wajib diisi" });
+    }
+    if ((await stat(new URL(path.split("/").at(-1)!, archive))).size === 0) {
+      await unlink(new URL(path.split("/").at(-1)!, archive));
+      return reply.code(400).send({ message: "File model tidak boleh kosong" });
     }
     const model = await store.addModel({ name, version, path });
     broadcast("model.created", model);
@@ -657,7 +745,7 @@ app.post("/api/models/activate", async (request, reply) => {
   if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
   const model = await store.activateModel(parsed.data.id, async selected => {
     const response = await fetch(`${config.aiServiceUrl}/models/activate`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ name: selected.name, version: selected.version, model_path: selected.path }),
       signal: AbortSignal.timeout(30000)
     });
@@ -686,7 +774,7 @@ app.get("/api/inference/latest", async (request) => {
 });
 
 app.get("/api/inference/history", async (request) => {
-  await store.syncModelCaptures();
+  await store.syncModelCaptures().catch(error => app.log.warn(error, "AI capture sync is not ready; retrying in background"));
   const user = await currentUser(request.headers.authorization);
   const factory = user ? getFactoryFilter(user.username) : "all";
   const history = await store.listInference();
@@ -722,7 +810,7 @@ app.get("/api/inference/model-frames", async (request) => {
 
 app.delete("/api/inference/:id", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
-  if (!(await checkAdminApproval(request, actor, reply))) return;
+  if (!(await checkAdminApproval(actor, reply))) return;
   const id = Number((request.params as { id: string }).id);
   if (!(await store.deleteInference(id))) return reply.code(404).send({ message: "Data inferensi tidak ditemukan" });
   broadcast("inference.deleted", { id });
@@ -731,7 +819,7 @@ app.delete("/api/inference/:id", async (request, reply) => {
 
 app.delete("/api/inference", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
-  if (!(await checkAdminApproval(request, actor, reply))) return;
+  if (!(await checkAdminApproval(actor, reply))) return;
   await store.clearAllInferences(await factoryCameraIds(actor));
   broadcast("inference.cleared", {});
   return { ok: true };
@@ -776,13 +864,13 @@ app.post("/api/truck-inspections", async (request, reply) => {
   try {
     const started = await fetch(`${config.aiServiceUrl}/cycle/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ camera_id: camera.id, cycle_code: created.id }),
       signal: AbortSignal.timeout(30000)
     });
     if (!started.ok) throw new Error(`AI start failed: ${started.status}`);
   } catch (err) {
-    await trucks.delete(created.id);
+    await trucks.delete(created.id, true);
     return reply.code(502).send({ message: "AI service gagal memulai siklus", detail: String(err) });
   }
 
@@ -805,7 +893,7 @@ app.patch("/api/truck-inspections/:id/complete", async (request, reply) => {
   try {
     const stopped = await fetch(`${config.aiServiceUrl}/cycle/stop`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ cycle_code: id }),
       signal: AbortSignal.timeout(35000)
     });
@@ -854,14 +942,14 @@ app.patch("/api/truck-inspections/:id", async (request, reply) => {
 });
 app.delete("/api/truck-inspections", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
-  if (!(await checkAdminApproval(request, actor, reply))) return;
+  if (!(await checkAdminApproval(actor, reply))) return;
   await trucks.clearAll(await factoryCameraIds(actor));
   broadcast("truck.cleared", {});
   return { ok: true };
 });
 app.delete("/api/truck-inspections/:id", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
-  if (!(await checkAdminApproval(request, actor, reply))) return;
+  if (!(await checkAdminApproval(actor, reply))) return;
   const id = (request.params as { id: string }).id;
   if (!id || id.trim() === "") return reply.code(400).send({ message: "ID inspeksi tidak valid" });
   if (!(await trucks.delete(id))) return reply.code(404).send({ message: "Inspeksi tidak ditemukan" });
@@ -869,8 +957,8 @@ app.delete("/api/truck-inspections/:id", async (request, reply) => {
   return { ok: true };
 });
 
-if (process.env.API_TEST_MODE !== "true") {
-  await store.syncModelCaptures();
+{
+  await store.syncModelCaptures().catch(error => app.log.warn(error, "AI capture sync is not ready; retrying in background"));
   let syncRunning = false;
   const syncTimer = setInterval(async () => {
     if (syncRunning) return;
@@ -883,4 +971,4 @@ if (process.env.API_TEST_MODE !== "true") {
   app.addHook("onClose", async () => clearInterval(syncTimer));
 }
 export { app };
-if (process.env.API_TEST_MODE !== "true") await app.listen({ host: config.host, port: config.port });
+await app.listen({ host: config.host, port: config.port });

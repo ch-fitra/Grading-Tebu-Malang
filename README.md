@@ -59,25 +59,39 @@ Untuk layanan terpisah, gunakan `npm run dev:api`, `npm run dev:ai`, dan `npm ru
 
 Siapkan kamera/RTSP dan ROI sesuai instalasi. Model tidak disertakan di Git. Konfigurasi aktif berada di `apps/ai-service/models/active/config.json`; letakkan file model sesuai `model_path`. Konfigurasi saat ini menggunakan Keras dengan backend PyTorch. Snapshot deteksi tersimpan di `apps/ai-service/storage/snapshots/`.
 
-Lihat [panduan AI service](apps/ai-service/README_FLOW.md) untuk detail. Model dan CCTV harus tersedia agar capture menghasilkan data nyata.
+Mode Auto memakai `apps/ai-service/models/active/frame_config.json` dan model `model_frame_sugarcane.keras` untuk mendeteksi seluruh frame tertutup tebu selama 3 detik, lalu menjalankan grading selama 30 detik. Lihat [panduan siklus otomatis](apps/ai-service/AUTO_CYCLE.md) untuk pengoperasiannya. Model dan CCTV harus tersedia agar capture menghasilkan data nyata.
 
 ## Desktop, mobile, dan deployment
 
-- **Desktop:** jalankan `npm run dev:desktop` setelah API/AI aktif. `npm run dev:all` menjalankan layanan, desktop, dan Flutter bila perangkat/toolchain tersedia.
+- **Desktop:** jalankan `npm run dev:desktop` setelah API/AI aktif. Alias `npm run dev:dekstop` juga tersedia. Desktop memakai Vite web yang sudah aktif di port 5175, atau menyalakannya bila belum ada. `npm run dev:all` menjalankan layanan, desktop, dan Flutter bila perangkat/toolchain tersedia.
 - **Mobile:** ikuti [panduan Flutter](apps/mobile/README.md). Ponsel fisik menggunakan IP LAN/domain server, bukan `localhost`.
 - **Web melalui gateway:** ikuti [panduan server Windows](deploy/README.md) untuk build, Nginx, dan Cloudflare Tunnel. `npm run dev:web` hanya membuka layanan pada komputer lokal.
 
-Alamat frontend dapat diubah melalui `apps/web/.env.local` atau environment proses: `VITE_API_URL`, `VITE_WS_URL`, dan `VITE_AI_SERVICE_URL`. Perubahan memerlukan restart Vite atau rebuild. Jangan menaruh secret dalam variabel `VITE_*`.
+Alamat frontend dapat diubah melalui `apps/web/.env.local` atau environment proses: `VITE_API_URL` dan `VITE_WS_URL`. Fitur AI menggunakan `/api/ai` melalui backend; atur `AI_SERVICE_URL` di server, bukan alamat localhost pada browser pengguna. Perubahan konfigurasi frontend memerlukan restart Vite atau rebuild. Jangan menaruh secret dalam variabel `VITE_*`.
 
-## Build dan pengujian
+### Satu kode untuk web dan desktop
+
+Semua tampilan, komponen, CSS, dan logika frontend dikerjakan di **`apps/web/src/`**. Folder `apps/desktop/` hanya berisi jendela Electron, preload, dan konfigurasi khusus desktop; tidak ada salinan UI yang perlu diedit.
+
+Saat pengembangan, browser dan desktop membuka sumber React yang sama melalui Vite. Simpan perubahan React/CSS, lalu keduanya diperbarui otomatis tanpa build ulang atau membuka ulang desktop. Perubahan pada kode Electron di `apps/desktop/src/` memerlukan restart `npm run dev:desktop`.
+
+Untuk membuka keduanya sekaligus, jalankan `npm run dev:web`, kemudian `npm run dev:desktop` di terminal kedua. Jika hanya desktop yang dijalankan, UI web juga bisa dibuka di http://127.0.0.1:5175 selama desktop aktif. API/AI tetap dijalankan seperti sebelumnya. Menutup desktop tidak menghentikan server milik `dev:web`; Vite yang dinyalakan oleh desktop sendiri ikut berhenti saat desktop ditutup. Port 5175 harus tersedia atau digunakan oleh Vite dari project ini.
+
+Installer desktop menggunakan hasil build dari `apps/web` yang sama melalui `npm run package -w @sugarcane/desktop`. Aplikasi yang sudah diinstal menerima perubahan UI setelah paket baru dibuild dan dipasang; pembaruan langsung lewat Vite hanya berlaku saat pengembangan. Desktop tetap dapat membuka UI hasil build tanpa server Vite.
+
+## Build dan pemeriksaan
 
 ```powershell
 npm run build
 npm run typecheck
-npm test
+npm run check:ready
 ```
 
-Build web berada di `apps/web/dist/`. Tes integrasi (`npm run test:integration`) membutuhkan PostgreSQL dengan izin membuat schema uji. Tes Python dijalankan dengan `npm run test:ai` ketika `.venv` aktif.
+Build web berada di `apps/web/dist/`.
+
+`check:ready` hanya membaca status. Untuk instalasi dua pabrik, atur `REQUIRED_CAMERA_IDS=1,2`; default pemeriksaan adalah kamera 2 (Trangkil).
+
+Lihat [hasil audit kesiapan](docs/readiness.md) untuk cakupan verifikasi dan batasan distribusi mobile.
 
 ## Struktur proyek
 
@@ -87,11 +101,9 @@ apps/api/           API, autentikasi, dan data aplikasi
 apps/ai-service/    CCTV, inferensi, dan database AI
 apps/desktop/       Electron
 apps/mobile/        Flutter
-packages/contracts/ Kontrak TypeScript bersama
 database/postgres/  Migrasi database aplikasi
 scripts/            Startup dan build
-tests/              Tes regresi dan integrasi
 docs/               Dokumentasi teknis
 ```
 
-Jika aplikasi gagal berjalan, periksa koneksi PostgreSQL, konfigurasi `.env`, dependensi Python, serta port 4110/5175/8010 yang mungkin sudah digunakan. Detail tersedia di [API](docs/api.md), [akses pengguna](docs/access-control.md), dan [database](docs/database.md).
+Jika aplikasi gagal berjalan, periksa koneksi PostgreSQL, konfigurasi `.env`, dependensi Python, serta port 4110/5175/8010 yang mungkin sudah digunakan. Detail tersedia di [akses pengguna](docs/access-control.md) dan [database](docs/database.md). Daftar endpoint AI tersedia di http://127.0.0.1:8010/docs saat layanan aktif.

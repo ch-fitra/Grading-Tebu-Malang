@@ -77,9 +77,9 @@ class _HistoryViewState extends State<HistoryView> {
           r['cameraId'],
           r['grade'],
           r['confidence'],
-          row(r['classes'])['daun'],
-          row(r['classes'])['pucuk'],
-          row(r['classes'])['sampah'],
+          r['impurityMeasured'] == true ? row(r['classes'])['daun'] : 'Tidak diukur',
+          r['impurityMeasured'] == true ? row(r['classes'])['pucuk'] : 'Tidak diukur',
+          r['impurityMeasured'] == true ? row(r['classes'])['sampah'] : 'Tidak diukur',
         ].map(cell).join(','),
     ].join('\n');
   }

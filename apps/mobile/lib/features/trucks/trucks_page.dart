@@ -65,7 +65,7 @@ class TrucksView extends StatelessWidget {
                 ),
                 Text('Mulai: ${date(truck['startedAt'])}'),
                 Text(
-                  'Tangkapan: ${n(truck['totalCaptures'])}  â€¢  Kotoran rata-rata: ${d(truck['averageImpurity']).toStringAsFixed(1)}%',
+                  'Tangkapan: ${n(truck['totalCaptures'])}  â€¢  Kotoran rata-rata: ${truck['impurityMeasured'] == true ? '${d(truck['averageImpurity']).toStringAsFixed(1)}%' : 'Tidak diukur'}',
                 ),
                 Text(
                   'Kepercayaan rata-rata: ${pct(truck['averageConfidence'])}',

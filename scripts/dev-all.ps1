@@ -74,7 +74,7 @@ $commands = @(
   "npm run dev -w @sugarcane/api",
   "npm run dev -w @sugarcane/web",
   "npm run dev:ai",
-  "npm run dev:desktop"
+  "npm run dev -w @sugarcane/desktop -- --reuse-web"
 )
 $names = "api,web,ai,desktop"
 $colors = "green,cyan,magenta,yellow"
