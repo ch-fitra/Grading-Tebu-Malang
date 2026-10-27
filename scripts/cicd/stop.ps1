@@ -10,6 +10,7 @@ foreach ($target in $targets) {
     if ($process) {
         $actual = Get-AppProcessIdentity -Process $process -Port $target.Port
         Assert-AppProcessIdentity -Actual $actual -Saved $target
+        Assert-AppProcessControl -ProcessId $target.Id
     }
 }
 foreach ($target in $targets) {

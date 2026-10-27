@@ -30,3 +30,27 @@ function Read-AppProcessManifest([string]$Path) {
         $entry
     }
 }
+
+function Assert-AppProcessControl([int]$ProcessId) {
+    if (-not ('Trangkil.ProcessAccess' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace Trangkil {
+    public static class ProcessAccess {
+        [DllImport("kernel32.dll", SetLastError=true)]
+        public static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        public static extern bool CloseHandle(IntPtr handle);
+    }
+}
+'@
+    }
+    # Request permission only; opening this handle does not terminate the process.
+    $handle = [Trangkil.ProcessAccess]::OpenProcess(1, $false, $ProcessId)
+    if ($handle -eq [IntPtr]::Zero) {
+        $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "Cannot control process $ProcessId (Windows error $errorCode). No stop attempted. Stop the old application from its original privileged session, then start it under the runner's non-administrator account."
+    }
+    [Trangkil.ProcessAccess]::CloseHandle($handle) | Out-Null
+}

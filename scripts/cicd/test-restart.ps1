@@ -14,6 +14,7 @@ foreach ($target in $targets) {
     $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($target.Id)"
     $actual=Get-AppProcessIdentity -Process $process -Port $target.Port
     Assert-AppProcessIdentity -Actual $actual -Saved $target
+    Assert-AppProcessControl -ProcessId $target.Id
 }
 & node (Join-Path $PSScriptRoot 'check-idle.mjs') $ProductionPath
 if ($LASTEXITCODE -ne 0) { throw 'Restart blocked: idle check failed.' }
