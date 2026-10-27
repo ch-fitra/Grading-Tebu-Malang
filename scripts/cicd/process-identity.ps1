@@ -13,3 +13,20 @@ function Assert-AppProcessIdentity($Actual, $Saved) {
         throw "Process identity changed for port $($Saved.Port); inspect server before retrying."
     }
 }
+
+function Read-AppProcessManifest([string]$Path) {
+    # Windows PowerShell 5.1 emits a JSON array as one pipeline object.
+    # Assign first, then enumerate explicitly; @(... | ConvertFrom-Json) nests it.
+    $parsed = ConvertFrom-Json -InputObject (Get-Content -LiteralPath $Path -Raw)
+    $entries = @($parsed)
+    $ports = @($entries | ForEach-Object { [int]$_.Port } | Sort-Object)
+    if ($entries.Count -ne 2 -or ($ports -join ',') -ne '4110,8010') {
+        throw 'Invalid application process manifest: expected one entry each for ports 4110 and 8010. Run setup-server.ps1 -AdoptCurrentProcesses.'
+    }
+    foreach ($entry in $entries) {
+        if (-not $entry.Id -or -not $entry.Name -or -not $entry.OwnerSid -or -not $entry.CreationDate) {
+            throw 'Incomplete application process manifest. Run setup-server.ps1 -AdoptCurrentProcesses.'
+        }
+        $entry
+    }
+}

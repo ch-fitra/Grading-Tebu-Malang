@@ -9,8 +9,7 @@ foreach ($name in @('start.ps1','stop.ps1','process-identity.ps1','processes.jso
     if (-not (Test-Path -LiteralPath (Join-Path $hooks $name))) { throw "Missing .deploy/$name" }
 }
 . (Join-Path $hooks 'process-identity.ps1')
-$targets=@(Get-Content -LiteralPath (Join-Path $hooks 'processes.json') -Raw | ConvertFrom-Json)
-if ($targets.Count -ne 2 -or @($targets.Port | Sort-Object -Unique).Count -ne 2 -or @($targets | Where-Object { $_.Port -notin @(4110,8010) }).Count) { throw 'Invalid application process manifest.' }
+$targets=@(Read-AppProcessManifest -Path (Join-Path $hooks 'processes.json'))
 foreach ($target in $targets) {
     $process=Get-CimInstance Win32_Process -Filter "ProcessId=$($target.Id)"
     $actual=Get-AppProcessIdentity -Process $process -Port $target.Port

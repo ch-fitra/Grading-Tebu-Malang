@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'process-identity.ps1')
 $manifest = Join-Path $ProductionPath '.deploy/processes.json'
 if (-not (Test-Path -LiteralPath $manifest)) { throw 'Run setup-server.ps1 -AdoptCurrentProcesses on the server first.' }
-$targets = @(Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json)
+$targets = @(Read-AppProcessManifest -Path $manifest)
 # Validate every identity before stopping anything. PID reuse must never kill another app.
 foreach ($target in $targets) {
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($target.Id)"
