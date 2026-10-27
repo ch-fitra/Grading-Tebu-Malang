@@ -26,3 +26,8 @@ apps/ai-service/models/active/*.pt
 apps/ai-service/models/active/*.onnx
 apps/ai-service/storage/snapshots/
 .runtime/
+backup/malang/*.local.backup
+backup/malang/database-*.json
+backup/
+.deploy/
+trangkil-cicd-patch/
