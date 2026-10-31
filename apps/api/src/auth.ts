@@ -53,8 +53,6 @@ export const auth = {
     connected = true;
     const devPass = process.env.APP_DEVELOPER_PASSWORD;
     const adminPass = process.env.APP_ADMIN_PASSWORD;
-    const trangkilAdminPass = process.env.PASSWORD_TRANGKIL_ADMIN;
-    const trangkilOpPass = process.env.PASSWORD_TRANGKIL_OPERATOR;
     const kebonagungAdminPass = process.env.PASSWORD_KEBONAGUNG_ADMIN;
     const kebonagungOpPass = process.env.PASSWORD_KEBONAGUNG_OPERATOR;
 
@@ -64,17 +62,11 @@ export const auth = {
     if (adminPass) {
       await bootstrapUser(process.env.APP_ADMIN_USER ?? "admin", adminPass, "admin");
     }
-    if (trangkilAdminPass) {
-      await bootstrapUser(process.env.USER_TRANGKIL_ADMIN ?? "admin_trangkil", trangkilAdminPass, "admin");
-    }
-    if (trangkilOpPass) {
-      await bootstrapUser(process.env.USER_TRANGKIL_OPERATOR ?? "operator_trangkil", trangkilOpPass, "operator");
-    }
     if (kebonagungAdminPass) {
-      await bootstrapUser(process.env.USER_KEBONAGUNG_ADMIN ?? "admin_kebonagung", kebonagungAdminPass, "admin");
+      await bootstrapUser(process.env.USER_KEBONAGUNG_ADMIN ?? "admin_malang", kebonagungAdminPass, "admin");
     }
     if (kebonagungOpPass) {
-      await bootstrapUser(process.env.USER_KEBONAGUNG_OPERATOR ?? "operator_kebonagung", kebonagungOpPass, "operator");
+      await bootstrapUser(process.env.USER_KEBONAGUNG_OPERATOR ?? "operator_malang", kebonagungOpPass, "operator");
     }
   },
   async login(username: string, password: string) {
@@ -87,13 +79,12 @@ export const auth = {
     if (!valid) return null;
     return { token: sign({ sub: u.id, exp: Date.now() + 8 * 60 * 60 * 1000 }), user: publicUser(u) };
   },
-  async verifyAdmin(factory: string, passwordOrPin: string): Promise<User | null> {
+  async verifyAdmin(passwordOrPin: string): Promise<User | null> {
     if (!passwordOrPin) return null;
     const allUsers = await auth.listUsers();
     const admins = allUsers.filter(u =>
       u.active &&
-      (u.role === "admin" || u.role === "developer") &&
-      (factory === "all" || u.username.toLowerCase().includes(factory.toLowerCase()) || u.role === "developer")
+      (u.role === "admin" || u.role === "developer")
     );
     for (const admin of admins) {
       const res = await pool!.query("SELECT password_hash FROM app_users WHERE id=$1", [admin.id]);

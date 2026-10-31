@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from contextlib import closing
 from typing import Dict, Any, Optional, List
 from db.connection import get_ai_db_connection, get_auth_db_connection
@@ -10,8 +11,38 @@ from psycopg2.extras import RealDictCursor
 logger = logging.getLogger("ai_repository")
 
 
+def malang_roi(camera_id: int, station: int):
+    if station != 2:
+        return None
+    template = json.loads((Path(__file__).resolve().parents[1] / "models" / "malang_roi.json").read_text(encoding="utf-8"))
+    return {**template, "camera_id": camera_id}
+
+
 class AIRepository:
     """Data Access Layer for AI Service operating on sugarcane_ai DB and reading sugarcane Auth DB."""
+
+    @staticmethod
+    def sync_application_cameras():
+        """The application database owns camera configuration, including disabled cameras."""
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("SELECT id,name,rtsp_url,location,enabled,station FROM cameras")
+                cameras = cursor.fetchall()
+        with closing(get_ai_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE ai_cameras SET is_active=false WHERE NOT (id = ANY(%s::int[]))", ([camera["id"] for camera in cameras],))
+                for camera in cameras:
+                    cursor.execute("""INSERT INTO ai_cameras(id,camera_code,name,rtsp_url,location,is_active)
+                        VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET
+                        name=EXCLUDED.name,rtsp_url=EXCLUDED.rtsp_url,location=EXCLUDED.location,
+                        is_active=EXCLUDED.is_active,updated_at=NOW()""",
+                        (camera["id"], f"CAM_API_{camera['id']}", camera["name"], camera["rtsp_url"],
+                         camera["location"], bool(camera["enabled"] and camera["rtsp_url"])))
+                    # Seed only cameras without a saved ROI; operator calibration is preserved.
+                    template = malang_roi(camera["id"], camera["station"])
+                    if template is not None:
+                        cursor.execute("UPDATE ai_cameras SET roi_config=%s WHERE id=%s AND roi_config IS NULL",
+                                       (json.dumps(template), camera["id"]))
 
     @staticmethod
     def history_summary(camera_ids: List[int], start_at=None, end_at=None, search: str = "") -> Dict[str, Any]:
@@ -119,12 +150,18 @@ class AIRepository:
     # --- Camera Management (from DB: sugarcane_ai) ---
     @staticmethod
     def register_camera(camera_id: int, rtsp_url: str, name: str):
+        with closing(get_auth_db_connection()) as conn, conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT station FROM cameras WHERE id=%s", (camera_id,))
+                camera = cursor.fetchone()
+        template = malang_roi(camera_id, camera[0]) if camera else None
         with closing(get_ai_db_connection()) as conn, conn:
             with conn.cursor() as cursor:
-                cursor.execute("""INSERT INTO ai_cameras(id,camera_code,name,rtsp_url,is_active)
-                    VALUES(%s,%s,%s,%s,true) ON CONFLICT(id) DO UPDATE
-                    SET name=EXCLUDED.name,rtsp_url=EXCLUDED.rtsp_url,is_active=true,updated_at=NOW()""",
-                    (camera_id, f"CAM_API_{camera_id}", name, rtsp_url))
+                cursor.execute("""INSERT INTO ai_cameras(id,camera_code,name,rtsp_url,is_active,roi_config)
+                    VALUES(%s,%s,%s,%s,true,%s) ON CONFLICT(id) DO UPDATE
+                    SET name=EXCLUDED.name,rtsp_url=EXCLUDED.rtsp_url,is_active=true,
+                    roi_config=COALESCE(ai_cameras.roi_config,EXCLUDED.roi_config),updated_at=NOW()""",
+                    (camera_id, f"CAM_API_{camera_id}", name, rtsp_url, json.dumps(template) if template else None))
 
     @staticmethod
     def deactivate_camera(camera_id: int):

@@ -44,18 +44,7 @@ export function RequestDeletionModal({
 
   if (!isOpen) return null;
 
-  const userFactory = (() => {
-    const u = (session?.user.username || "").toLowerCase();
-    if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
-    if (u.includes("trangkil")) return "trangkil";
-    return "all";
-  })();
-
-  const expectedAdminUser = userFactory === "kebonagung" 
-    ? "admin_kebonagung (Direksi PG Kebon Agung)" 
-    : userFactory === "trangkil" 
-    ? "admin_trangkil (Direksi PT Trangkil)" 
-    : "Admin / Direksi Pabrik";
+  const expectedAdminUser = "Admin / Direksi PG Kebon Agung";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

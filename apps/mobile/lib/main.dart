@@ -28,7 +28,7 @@ class SugarcaneApp extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: state,
     builder: (context, _) => MaterialApp(
-      title: 'Tebu AI',
+      title: 'TebuAI Malang',
       debugShowCheckedModeBanner: false,
       themeMode: state.dark ? ThemeMode.dark : ThemeMode.light,
       theme: _theme(false),

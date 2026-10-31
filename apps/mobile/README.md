@@ -19,7 +19,7 @@ Cara termudah untuk pengembangan seluruh platform dari akar repository adalah:
 npm run dev:all
 ```
 
-Perintah tersebut memulai database, API, AI service, web, desktop, dan otomatis menjalankan Flutter ke Android apabila perangkat terdeteksi. Ponsel fisik harus tersambung USB dengan USB debugging aktif atau emulator harus sudah berjalan.
+Perintah tersebut memeriksa database Malang, menjalankan migrasi, API, AI, web, dan desktop. Untuk menjalankan Flutter pada Android yang terdeteksi, gunakan `npm run dev:all -- -IncludeMobile`. Ponsel fisik harus tersambung USB dengan USB debugging aktif atau emulator harus sudah berjalan.
 
 Mulai PostgreSQL, migrasi, dan backend dari akar repo lebih dulu (lihat README utama). Lalu:
 
@@ -31,7 +31,7 @@ flutter run
 
 Di mesin pengembangan ini Flutter SDK lokal juga tersedia di `.toolchains/flutter/bin/flutter.bat`, sehingga dapat memakai `..\..\.toolchains\flutter\bin\flutter.bat run` dari `apps/mobile` jika `flutter` belum ada di PATH.
 
-Alamat default API: Android Emulator `http://10.0.2.2:4110`, iOS Simulator `http://127.0.0.1:4110`. Di ponsel fisik, ubah alamat di layar login/Pengaturan menjadi IP LAN atau domain server, misalnya `http://192.168.1.10:4110`. Backend harus mendengarkan alamat jaringan (`API_HOST=0.0.0.0`) dan firewall harus mengizinkan port 4110. Perangkat dan server harus berada pada jaringan yang saling terhubung. Alternatifnya set URL saat build: `flutter run --dart-define=API_BASE_URL=https://api.example.com`.
+Alamat default API: Android Emulator `http://10.0.2.2:4111`, iOS Simulator `http://127.0.0.1:4111`. Di ponsel fisik, ubah alamat di layar login/Pengaturan menjadi IP LAN atau domain server, misalnya `http://192.168.1.10:4111`. Backend harus mendengarkan alamat jaringan (`API_HOST=0.0.0.0`) dan firewall harus mengizinkan port 4111. Perangkat dan server harus berada pada jaringan yang saling terhubung. Alternatifnya set URL saat build: `flutter run --dart-define=API_BASE_URL=https://api.example.com`.
 
 Untuk paket Android pengembangan: `flutter build apk --debug` → `build/app/outputs/flutter-apk/app-debug.apk`. Build iOS membutuhkan macOS, Xcode, sertifikat/signing, dan uji di perangkat/simulator iOS. Build release Android perlu keystore sendiri; template Flutter masih menggunakan debug signing untuk release.
 

@@ -20,13 +20,13 @@ export default defineConfig({
   ],
   server: {
     host: "127.0.0.1",
-    port: 5175,
+    port: 5176,
     strictPort: true,
     proxy: {
-      "/api": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110",
-      "/health": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110",
-      "/storage": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110",
-      "/ws": { target: process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4110", ws: true }
+      "/api": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4111",
+      "/health": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4111",
+      "/storage": process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4111",
+      "/ws": { target: process.env.VITE_BACKEND_URL ?? "http://127.0.0.1:4111", ws: true }
     }
   }
 });

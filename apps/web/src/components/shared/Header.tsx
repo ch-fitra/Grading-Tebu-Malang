@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAppStore } from "../../store";
 import { Clock, ShieldCheck, ShieldAlert } from "lucide-react";
+import "./FixedWorkspace.css";
 
 export function Header({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
   const { status } = useAppStore();

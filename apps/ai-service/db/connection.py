@@ -12,8 +12,16 @@ ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT / ".env", override=False)
 
 # Database Connection URLs
-PRIMARY_DB_URL = os.getenv("DATABASE_URL", "postgres://postgres:admin123@127.0.0.1:5432/sugarcane")
-AI_DB_URL = os.getenv("AI_DATABASE_URL", "postgres://postgres:admin123@127.0.0.1:5432/sugarcane_ai")
+if os.getenv("AUTO_CYCLE_API_URL") != "http://127.0.0.1:4111":
+    raise RuntimeError("AUTO_CYCLE_API_URL Malang harus http://127.0.0.1:4111")
+PRIMARY_DB_URL = os.environ["DATABASE_URL"]
+AI_DB_URL = os.environ["AI_DATABASE_URL"]
+from urllib.parse import urlparse
+if os.getenv("INSTALLATION_ID") != "malang":
+    raise RuntimeError("INSTALLATION_ID harus malang")
+for key, value, expected in [("DATABASE_URL", PRIMARY_DB_URL, "sugarcane_malang"), ("AI_DATABASE_URL", AI_DB_URL, "sugarcane_ai_malang")]:
+    if urlparse(value).path != "/" + expected:
+        raise RuntimeError(f"{key} harus memakai database khusus Malang: {expected}")
 
 
 def get_ai_db_connection():

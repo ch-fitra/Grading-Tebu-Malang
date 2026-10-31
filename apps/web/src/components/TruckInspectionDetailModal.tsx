@@ -15,7 +15,7 @@ import {
   HelpCircle
 } from "lucide-react";
 import type { TruckInspectionSession, InferenceResult } from "../types";
-import { TRANGKIL_GRADES, normalizeGrade, type TrangkilGradeItem } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, normalizeGrade, type KebonAgungGradeItem } from "../utils/grade-guide";
 
 interface TruckInspectionDetailModalProps {
   session: TruckInspectionSession;
@@ -24,37 +24,11 @@ interface TruckInspectionDetailModalProps {
   onViewCapture: (capture: InferenceResult) => void;
 }
 
-// Resolver informasi Meja Tebu yang akurat (PG Trangkil MBS 5 / PG Kebon Agung MBS 1)
-function resolveMbsInfo(line?: number, truckCode?: string) {
-  const code = (truckCode || "").toLowerCase();
-  if (line === 2 || line === 5 || code.includes("mbs 5") || code.includes("trangkil")) {
-    return {
-      mbsNum: 5,
-      label: "MBS 5",
-      subLabel: "Meja Tebu 5 (Wisenet)",
-      factory: "PG Trangkil (Pati)",
-      full: "MBS 5 — Meja Tebu 5 (PG Trangkil)"
-    };
-  }
-  if (line === 1 || code.includes("mbs 1") || code.includes("kebon agung") || code.includes("malang")) {
-    return {
-      mbsNum: 1,
-      label: "MBS 1",
-      subLabel: "Meja Tebu 1 (Utama)",
-      factory: "PG Kebon Agung (Malang)",
-      full: "MBS 1 — Meja Tebu 1 (PG Kebon Agung)"
-    };
-  }
-  return {
-    mbsNum: line || 1,
-    label: `MBS ${line || 1}`,
-    subLabel: `Meja Tebu ${line || 1}`,
-    factory: "Stasiun Meja Tebu",
-    full: `MBS ${line || 1} — Meja Tebu ${line || 1}`
-  };
-}
+import { useAppStore } from "../store";
+import { resolveMbsStation } from "../utils/stations";
 
 export function TruckInspectionDetailModal({ session, history, onClose, onViewCapture }: TruckInspectionDetailModalProps) {
+  const cameras = useAppStore(state => state.cameras);
   const modalSize = usePanelSize<HTMLDivElement>();
   const compactLayout = modalSize.width < 850 || modalSize.height < 540;
   const [detailPanel, setDetailPanel] = useState("frames");
@@ -117,10 +91,11 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
     return `${mins}m ${secs}s`;
   };
 
-  // Evaluasi grade hasil akhir dari rata-rata kotoran sesi truk ini
+  // Evaluasi kelas mutu akhir sesi truk
   const finalGradeCode = dominantGrade(sessionCaptures) ?? "M";
-  const curGradeConfig: TrangkilGradeItem = TRANGKIL_GRADES.find(g => g.code === finalGradeCode) || TRANGKIL_GRADES[1];
-  const mbsInfo = resolveMbsInfo(session.line, session.truckCode);
+  const curGradeConfig: KebonAgungGradeItem = KEBONAGUNG_GRADES.find(g => g.code === finalGradeCode) || KEBONAGUNG_GRADES[1];
+  const station = resolveMbsStation(session.line, cameras);
+  const mbsInfo = { ...station, factory: "PG Kebon Agung (Malang)", full: `${station.label} - Meja Tebu ${station.mbsNum} (PG Kebon Agung)` };
 
   const isCompleted = session.status === "completed";
 
@@ -201,24 +176,11 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                 </div>
               </div>
 
-              {/* 4 Metrik Ringkasan Utama */}
+              {/* Ringkasan grading */}
               <div className="truck-hero-metrics-grid">
                 <div className="truck-metric-item">
                   <span className="truck-metric-label">Total Frame:</span>
                   <strong className="truck-metric-val">{session.totalCaptures} Frame</strong>
-                </div>
-                <div className="truck-metric-item">
-                  <span className="truck-metric-label">Rata-rata Kotoran:</span>
-                  <strong 
-                    className="truck-metric-val"
-                    style={{ color: curGradeConfig.color }}
-                  >
-                    {session.impurityMeasured ? `${session.averageImpurity.toFixed(1)}%` : "Tidak diukur"}
-                  </strong>
-                </div>
-                <div className="truck-metric-item">
-                  <span className="truck-metric-label">Toleransi Kotoran:</span>
-                  <strong className="truck-metric-val">{curGradeConfig.tol}</strong>
                 </div>
                 <div className="truck-metric-item">
                   <span className="truck-metric-label">Status Giling:</span>
@@ -278,14 +240,14 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               )}
             </div>
 
-            {/* Kartu Standar Evaluasi 7 Kelas Mutu PG Trangkil (Kompak & Presisi) */}
+            {/* Kartu Standar Evaluasi 7 Kelas Mutu PG Kebon Agung (Kompak & Presisi) */}
             <div className="truck-detail-card truck-grades-card">
               <div className="truck-card-title-bar">
                 <ShieldCheck size={12} />
                 <h4>STANDAR 7 KELAS MUTU TEBU (AI)</h4>
               </div>
               <div className="truck-grades-compact-guide">
-                {TRANGKIL_GRADES.map(item => {
+                {KEBONAGUNG_GRADES.map(item => {
                   const isMatch = item.code === curGradeConfig.code;
                   return (
                     <div 
@@ -301,7 +263,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                         <span className="truck-guide-title">
                           {item.label} <small className="truck-guide-sub">({item.name})</small>
                         </span>
-                        <span className="truck-guide-kriteria">Tol: {item.tol} &bull; Rafaksi {item.rafaksi}</span>
+                        <span className="truck-guide-kriteria">Rafaksi {item.rafaksi}</span>
                       </div>
                       {isMatch && (
                         <span className="truck-guide-match-tag">Hasil AI</span>
@@ -348,7 +310,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                         if (next !== null) { event.preventDefault(); options[next]?.focus(); }
                       }}>
                         <div className="gradePickerMenuHeading">Pilih kelas mutu</div>
-                        {[{ code: "all", label: "Semua Mutu", name: "Seluruh frame siklus", color: "#2563eb" }, ...TRANGKIL_GRADES].map(grade => {
+                        {[{ code: "all", label: "Semua Mutu", name: "Seluruh frame siklus", color: "#2563eb" }, ...KEBONAGUNG_GRADES].map(grade => {
                           const count = grade.code === "all" ? sortedCaptures.length : sortedCaptures.filter(c => normalizeGrade(c.grade) === grade.code).length;
                           return <button type="button" key={grade.code} role="option" aria-selected={selectedGradeFilter === grade.code} disabled={count === 0}
                             onClick={() => { setSelectedGradeFilter(grade.code); setCurrentPage(1); setGradePickerOpen(false); gradePickerRef.current?.querySelector<HTMLButtonElement>(".gradePickerTrigger")?.focus(); }}>
@@ -407,7 +369,6 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                         <th style={{ width: "95px" }}>Frame</th>
                         <th style={{ width: "105px" }}>Waktu</th>
                         <th style={{ width: "115px" }}>Mutu AI</th>
-                        <th style={{ width: "110px" }}>Kotoran</th>
                         <th style={{ width: "90px" }}>Akurasi</th>
                         <th style={{ width: "100px", textAlign: "right" }}>Aksi</th>
                       </tr>
@@ -415,9 +376,8 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                     <tbody>
                       {visibleCaptures.map((item) => {
                         const cycleNumber = sortedCaptures.findIndex(frame => frame.id === item.id) + 1;
-                        const impurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                         const normGrade = normalizeGrade(item.grade);
-                        const rowGradeDef = TRANGKIL_GRADES.find(g => g.code === normGrade) || TRANGKIL_GRADES[1];
+                        const rowGradeDef = KEBONAGUNG_GRADES.find(g => g.code === normGrade) || KEBONAGUNG_GRADES[1];
 
                         return (
                           <tr key={item.id} className="truck-cycle-row">
@@ -435,11 +395,6 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                               <span className={`table-grade-badge ${rowGradeDef.badgeCls}`}>
                                 MBS {normGrade}
                               </span>
-                            </td>
-                            <td>
-                              <strong className={`impurity-val ${impurity > 20 ? "text-danger" : impurity > 10 ? "text-amber" : "text-success"}`}>
-                                {item.impurityMeasured ? `${impurity.toFixed(1)}%` : "Tidak diukur"}
-                              </strong>
                             </td>
                             <td>
                               <span className="conf-val">

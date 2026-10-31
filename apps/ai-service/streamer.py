@@ -34,13 +34,13 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
 
 
 class ROIModel(BaseModel):
-    camera_id: int = 1
+    camera_id: int = Field(gt=0)
     enabled: bool = True
     x: float = Field(0.10, ge=0, lt=1)  # normalized 0.0 - 1.0 (left)
     y: float = Field(0.15, ge=0, lt=1)  # normalized 0.0 - 1.0 (top)
     width: float = Field(0.80, gt=0, le=1)  # normalized width
     height: float = Field(0.70, gt=0, le=1)  # normalized height
-    label: str = "ROI: MEJA TEBU MBS 1 (PT KEBON AGUNG)"
+    label: str = "ROI: MEJA TEBU (PG KEBON AGUNG)"
     show_grid: bool = True
     show_telemetry: bool = True
     show_scrim: bool = True
@@ -52,34 +52,14 @@ class ROIModel(BaseModel):
         return self
 
 
-DEFAULT_ROIS: Dict[int, ROIModel] = {
-    1: ROIModel(
-        camera_id=1,
-        enabled=True,
-        x=0.10,
-        y=0.15,
-        width=0.80,
-        height=0.70,
-        label="ROI: MEJA TEBU MBS 1 (PT KEBON AGUNG)",
-        show_grid=True,
-        show_telemetry=True,
-        show_scrim=True,
-    ),
-    2: ROIModel(
-        camera_id=2,
-        enabled=True,
-        x=0.12,
-        y=0.10,
-        width=0.76,
-        height=0.78,
-        label="ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)",
-        show_grid=True,
-        show_telemetry=True,
-        show_scrim=True,
-    ),
-}
+DEFAULT_ROIS: Dict[int, ROIModel] = {}
 
 _CACHED_ROIS: Optional[Dict[int, ROIModel]] = None
+
+
+def invalidate_rois():
+    global _CACHED_ROIS
+    _CACHED_ROIS = None
 
 
 def load_all_rois() -> Dict[int, ROIModel]:
@@ -463,7 +443,7 @@ class CameraStream:
     def _encode_loop(self, stop_event: threading.Event):
         """Dedicated background encoder thread.
         Pre-encodes overlay and raw JPEGs as frames arrive and notifies all waiting async streaming clients.
-        Paces encoding at a smooth 28 FPS (matching PT Malang standard) to eliminate CPU spikes, burst lags, and jump frames.
+        Paces encoding at a smooth 28 FPS (for the live inspection display) to eliminate CPU spikes, burst lags, and jump frames.
         """
         last_processed_raw_id = -1
         last_encode_time = 0.0
@@ -606,6 +586,7 @@ class StreamManager:
     def get_or_create(self, camera_id: int, rtsp_url: str, camera_name: str = "Camera") -> CameraStream:
         if camera_id in self.streams:
             stream = self.streams[camera_id]
+            stream.camera_name = camera_name
             if stream.rtsp_url != rtsp_url:
                 stream.stop()
                 stream.rtsp_url = rtsp_url

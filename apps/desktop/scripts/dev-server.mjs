@@ -20,7 +20,7 @@ async function isSharedWebServer(url) {
   }
 }
 
-export async function ensureSharedWebServer({ port = 5175, reuseOnly = false } = {}) {
+export async function ensureSharedWebServer({ port = 5176, reuseOnly = false } = {}) {
   const url = `http://127.0.0.1:${port}`;
   const reused = { url, owned: false, close: async () => {} };
   if (await isSharedWebServer(url)) return reused;

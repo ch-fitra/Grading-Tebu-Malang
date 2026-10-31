@@ -56,7 +56,7 @@ export interface TappingRecord {
   supplier: string;
   spatNumber: string;
   notes?: string;
-  // PT Trangkil Specific Metadata
+  // PG Kebon Agung Specific Metadata
   noMeja?: number;
   mbsRaw?: string | number;
   factoryGrade?: string;
@@ -80,7 +80,7 @@ export interface FileImportStats {
 }
 
 // Excel serials represent wall-clock dates, not UTC instants.
-export function parseTrangkilDate(raw: unknown, fallbackDate?: Date, date1904 = false): Date | null {
+export function parseKebonAgungDate(raw: unknown, fallbackDate?: Date, date1904 = false): Date | null {
   if (raw instanceof Date) return Number.isFinite(raw.getTime()) ? raw : null;
   if (raw === null || raw === undefined || raw === "") return null;
   if (typeof raw === "number" || /^\d{5}(?:\.\d+)?$/.test(String(raw).trim())) {
@@ -225,8 +225,8 @@ export async function parseExcelOrCsv(file: Pick<File, "name" | "arrayBuffer">):
     const rawTglDaftar =
       tglDaftarIdx !== -1 && row[tglDaftarIdx] !== undefined ? String(row[tglDaftarIdx]).trim() : "";
 
-    const dateDaftar = parseTrangkilDate(row[tglDaftarIdx], undefined, date1904);
-    const dateNilai = parseTrangkilDate(row[tglNilaiIdx], dateDaftar ?? undefined, date1904);
+    const dateDaftar = parseKebonAgungDate(row[tglDaftarIdx], undefined, date1904);
+    const dateNilai = parseKebonAgungDate(row[tglNilaiIdx], dateDaftar ?? undefined, date1904);
 
     // Primary timestamp: prefer tgl_nilai (actual conveyor hoist time), fallback to tgl_daftar
     const primaryDate = dateNilai || dateDaftar;
@@ -239,13 +239,13 @@ export async function parseExcelOrCsv(file: Pick<File, "name" | "arrayBuffer">):
       : rawTglNilai || rawTglDaftar;
 
     records.push({
-      id: `trangkil_${i}_${rawQueue}`,
+      id: `kebonagung_${i}_${rawQueue}`,
       queueNumber: rawQueue,
       tappingTimeStr: timeDisplay,
       tappingTime: primaryDate,
       plateNumber: plateIdx !== -1 ? String(row[plateIdx] ?? "").trim() : rawQueue,
       driverName: `Armada ${rawQueue}`,
-      supplier: noMeja ? `PT Trangkil — Meja Tebu ${noMeja}` : "PT Trangkil",
+      supplier: noMeja ? `PG Kebon Agung — Meja Tebu ${noMeja}` : "PG Kebon Agung",
       spatNumber: rawMbs ? `SPAT-MBS${noMeja || ""}-${rawMbs}` : "",
       noMeja,
       mbsRaw: rawMbs,
@@ -254,7 +254,7 @@ export async function parseExcelOrCsv(file: Pick<File, "name" | "arrayBuffer">):
       tglDaftarStr: rawTglDaftar,
       tglNilaiDate: dateNilai,
       tglDaftarDate: dateDaftar,
-      notes: `Data Pos Timbang PT Trangkil (Meja ${noMeja || "-"}, Grade Pabrik: ${rawKode || "-"})`
+      notes: `Data Pos Timbang PG Kebon Agung (Meja ${noMeja || "-"}, Grade Pabrik: ${rawKode || "-"})`
     });
   }
 

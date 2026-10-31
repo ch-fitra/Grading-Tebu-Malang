@@ -1,95 +1,107 @@
 param(
-  [string]$MobileApiUrl
+    [switch]$IncludeMobile,
+    [string]$MobileApiUrl,
+    [string]$MobileDeviceId,
+    [switch]$CheckOnly
 )
-
-$ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
-
+$ErrorActionPreference = 'Stop'
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$previousEnv = @{}
+function Set-ChildEnv([string]$key,[string]$value) {
+    if (-not $previousEnv.ContainsKey($key)) { $previousEnv[$key] = [Environment]::GetEnvironmentVariable($key,'Process') }
+    [Environment]::SetEnvironmentVariable($key,$value,'Process')
+}
 function Require-Success([string]$label) {
-  if ($LASTEXITCODE -ne 0) { throw "$label gagal. Periksa output di atas." }
+    if ($LASTEXITCODE -ne 0) { throw "$label gagal. Periksa output di atas." }
 }
-
-Set-Location $root
-
-# Restore packages before Vite and the desktop build try to resolve imports.
-& npm.cmd install --ignore-scripts
-Require-Success "Instalasi dependensi"
-
-Write-Host "[1/3] Memeriksa PostgreSQL..." -ForegroundColor Cyan
-$databaseUrl = $env:DATABASE_URL
-if ([string]::IsNullOrWhiteSpace($databaseUrl) -and (Test-Path .env)) {
-  $databaseLine = Get-Content .env | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1
-  if ($databaseLine) { $databaseUrl = ($databaseLine -replace '^DATABASE_URL=', '').Trim().Trim('"', "'") }
-}
-$databasePort = 5432
-if ($databaseUrl) {
-  $databaseUri = [Uri]$databaseUrl
-  if ($databaseUri.Port -gt 0) { $databasePort = $databaseUri.Port }
-}
-$postgresRunning = $null -ne (Get-NetTCPConnection -LocalPort $databasePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
-if (-not $postgresRunning) {
-  if ($databasePort -ne 5432) { throw "PostgreSQL port $databasePort belum berjalan. Nyalakan service database sesuai DATABASE_URL." }
-  & docker compose up -d postgres
-  Require-Success "PostgreSQL"
-  for ($attempt = 1; $attempt -le 30; $attempt++) {
-    $health = [string](& docker inspect --format '{{.State.Health.Status}}' sugarcane-postgres 2>$null)
-    $health = $health.Trim()
-    if ($health -eq "healthy") { $postgresRunning = $true; break }
-    Start-Sleep -Seconds 2
-  }
-}
-if (-not $postgresRunning) { throw "PostgreSQL belum siap. Nyalakan Docker Desktop atau service PostgreSQL, lalu ulangi perintah." }
-
-Write-Host "[2/3] Menerapkan migrasi database..." -ForegroundColor Cyan
-& npm.cmd run db:migrate
-Require-Success "Migrasi database"
-
-# API perlu terbuka ke Wi-Fi/LAN agar aplikasi di ponsel fisik dapat terhubung.
-$env:API_HOST = "0.0.0.0"
-
-$flutter = Join-Path $root ".toolchains\flutter\bin\flutter.bat"
-if (-not (Test-Path $flutter)) {
-  $flutterCommand = Get-Command flutter -ErrorAction SilentlyContinue
-  $flutter = if ($null -eq $flutterCommand) { $null } else { $flutterCommand.Source }
-}
-
-if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) {
-  $addresses = Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
-    $_.IPAddress -match '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)' -and
-    $_.InterfaceAlias -notmatch 'Tailscale|Loopback|Docker|vEthernet'
-  }
-  $wireless = $addresses | Where-Object { $_.InterfaceAlias -match 'Wi-Fi|WLAN|Wireless' } | Select-Object -First 1
-  $selectedAddress = if ($wireless) { $wireless } else { $addresses | Select-Object -First 1 }
-  if ($selectedAddress) { $MobileApiUrl = "http://$($selectedAddress.IPAddress):4110" }
-}
-
-$device = $null
+Push-Location -LiteralPath $projectRoot
 try {
-  if ($flutter) {
-    $device = (& $flutter devices --machine 2>$null | ConvertFrom-Json | Where-Object { $_.targetPlatform -match '^android' } | Select-Object -First 1).id
-  }
-} catch { $device = $null }
+    if (Test-Path -LiteralPath (Join-Path $projectRoot '.runtime/malang/processes.json')) { throw 'Mode server Malang masih memiliki manifest. Jalankan npm run stop:malang sebelum dev:all.' }
+    foreach ($port in @(4111,5176,8011)) {
+        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) { throw "Port Malang $port sedang dipakai. Proses yang ada tidak digunakan ulang atau dihentikan." }
+    }
+    foreach ($line in Get-Content -LiteralPath (Join-Path $projectRoot '.env')) {
+        if ($line -match '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { Set-ChildEnv $Matches[1] $Matches[2] }
+    }
+    if ($env:INSTALLATION_ID -ne 'malang') { throw 'Instalasi ini bukan Malang.' }
+    if ($env:API_PORT -ne '4111' -or $env:AI_SERVICE_URL -ne 'http://127.0.0.1:8011') { throw 'Launcher demo Malang memakai API 4111 dan AI 8011. Periksa .env.' }
+    Set-ChildEnv 'NODE_ENV' 'development'
+    Set-ChildEnv 'KERAS_BACKEND' 'torch'
+    Set-ChildEnv 'API_HOST' $(if ($IncludeMobile) { '0.0.0.0' } else { '127.0.0.1' })
+    Set-ChildEnv 'VITE_API_URL' 'same-origin'
+    Set-ChildEnv 'VITE_BACKEND_URL' 'http://127.0.0.1:4111'
+    Set-ChildEnv 'VITE_WS_URL' 'same-origin'
+    Set-ChildEnv 'SUGARCANE_API_URL' 'http://127.0.0.1:4111'
+    Set-ChildEnv 'SUGARCANE_AI_SERVICE_URL' 'http://127.0.0.1:8011'
 
-$commands = @(
-  "npm run dev -w @sugarcane/api",
-  "npm run dev -w @sugarcane/web",
-  "npm run dev:ai",
-  "npm run dev -w @sugarcane/desktop -- --reuse-web"
-)
-$names = "api,web,ai,desktop"
-$colors = "green,cyan,magenta,yellow"
+    & node (Join-Path $PSScriptRoot 'check-databases.mjs')
+    Require-Success 'Pemeriksaan database Malang'
+    if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'node_modules/concurrently/package.json'))) { throw 'Dependensi Node belum lengkap. Jalankan npm ci dahulu.' }
+    $python = Join-Path $projectRoot '.venv/Scripts/python.exe'
+    if (-not (Test-Path -LiteralPath $python)) { throw 'Python .venv Malang belum tersedia. Ikuti README untuk menyiapkannya.' }
 
-if ($device) {
-  if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) { throw "Alamat LAN tidak ditemukan. Jalankan dengan -MobileApiUrl http://IP-KOMPUTER:4110." }
-  $mobileCommand = "cd /d `"$root\apps\mobile`" && `"$flutter`" run -d $device --dart-define=API_BASE_URL=$MobileApiUrl"
-  $commands += $mobileCommand
-  $names += ",mobile"
-  $colors += ",blue"
-  Write-Host "[3/3] Menjalankan semua klien. Mobile memakai $MobileApiUrl pada perangkat $device." -ForegroundColor Green
-} else {
-  Write-Host "[3/3] Menjalankan API, web, AI, dan desktop. Tidak ada Android terdeteksi; pasang APK atau hubungkan ponsel lalu ulangi perintah ini." -ForegroundColor Yellow
-  if ($MobileApiUrl) { Write-Host "Alamat mobile yang direkomendasikan: $MobileApiUrl" -ForegroundColor Yellow }
+    $commands = @(
+        'npm run dev -w @sugarcane/api',
+        'npm run dev -w @sugarcane/web',
+        'npm run dev:ai',
+        'npm run dev -w @sugarcane/desktop -- --reuse-web'
+    )
+    $names = 'api,web,ai,desktop'
+    $colors = 'green,cyan,magenta,yellow'
+    $mobileReady = $false
+    if ($IncludeMobile) {
+        $flutter = Join-Path $projectRoot '.toolchains/flutter/bin/flutter.bat'
+        if (-not (Test-Path -LiteralPath $flutter)) {
+            $flutterCommand = Get-Command flutter -ErrorAction SilentlyContinue
+            $flutter = if ($flutterCommand) { $flutterCommand.Source } else { $null }
+        }
+        if (-not $flutter) { throw 'Flutter belum tersedia. Pasang Flutter atau tambahkan ke PATH.' }
+        $devices = @(& $flutter devices --machine 2>$null | ConvertFrom-Json | Where-Object { $_.targetPlatform -match '^android' })
+        Require-Success 'Pencarian perangkat Android'
+        $device = if ($MobileDeviceId) { $devices | Where-Object id -eq $MobileDeviceId | Select-Object -First 1 } else { $devices | Select-Object -First 1 }
+        if (-not $device) {
+            if (-not $CheckOnly) { throw 'Android belum terdeteksi. Hubungkan ponsel dengan USB debugging aktif atau nyalakan emulator, lalu ulangi -IncludeMobile.' }
+            Write-Warning 'Pemeriksaan saja: Android belum terdeteksi; Flutter belum dapat dijalankan ke perangkat.'
+        } else {
+            if ($device.id -notmatch '^[A-Za-z0-9_.:-]+$') { throw 'ID perangkat Android tidak valid.' }
+            if ([string]::IsNullOrWhiteSpace($MobileApiUrl)) {
+                if ($device.emulator) { $MobileApiUrl = 'http://10.0.2.2:4111' }
+                else {
+                    $addresses = @(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -match '^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)' -and $_.InterfaceAlias -notmatch 'Tailscale|Loopback|Docker|vEthernet' })
+                    $selected = $addresses | Sort-Object @{Expression={if ($_.InterfaceAlias -match 'Wi-Fi|WLAN|Wireless') {0} else {1}}} | Select-Object -First 1
+                    if ($selected) { $MobileApiUrl = "http://$($selected.IPAddress):4111" }
+                }
+            }
+            $parsedUrl = $null
+            if (-not [Uri]::TryCreate($MobileApiUrl,[UriKind]::Absolute,[ref]$parsedUrl) -or $parsedUrl.Scheme -notin @('http','https') -or $parsedUrl.UserInfo -or $parsedUrl.Query -or $parsedUrl.Fragment) { throw 'MobileApiUrl harus alamat dasar HTTP/HTTPS tanpa kredensial, query atau fragment.' }
+            $safeUrl = $parsedUrl.AbsoluteUri.TrimEnd('/')
+            $commands += "cd /d `"$projectRoot\apps\mobile`" && `"$flutter`" run -d $($device.id) --dart-define=API_BASE_URL=`"$safeUrl`""
+            $names += ',mobile'
+            $colors += ',blue'
+            $mobileReady = $true
+            Write-Host "Mobile Android: $($device.id); API $safeUrl"
+        }
+    }
+    Write-Host 'Malang: web http://127.0.0.1:5176, API 4111, AI 8011, desktop memakai UI Malang yang sama.'
+    if (-not $IncludeMobile) { Write-Host 'Tambahkan -- -IncludeMobile untuk menjalankan Flutter ke Android.' }
+    if ($CheckOnly) {
+        Write-Host "Pemeriksaan selesai. Rencana: $names. Mobile siap: $mobileReady. Tidak ada layanan atau aplikasi klien yang dijalankan."
+    } else {
+        & $python -c 'import uvicorn, cv2, psycopg2, fastapi, keras, torch'
+        Require-Success 'Dependensi AI Malang'
+        & node (Join-Path $projectRoot 'apps/desktop/scripts/ensure-electron.cjs')
+        Require-Success 'Runtime desktop Electron'
+        & npm.cmd run db:migrate
+        Require-Success 'Migrasi database Malang'
+        if ($mobileReady) {
+            Push-Location -LiteralPath (Join-Path $projectRoot 'apps/mobile')
+            try { & $flutter pub get; Require-Success 'Dependensi mobile' } finally { Pop-Location }
+        }
+        Write-Host 'Menjalankan klien Malang. Tekan Ctrl+C pada terminal ini untuk menghentikan seluruh proses dev:all miliknya.'
+        & npx.cmd --no-install concurrently --kill-others --names $names --prefix-colors $colors @commands
+        Require-Success 'Sesi dev:all Malang'
+    }
+} finally {
+    foreach ($key in $previousEnv.Keys) { [Environment]::SetEnvironmentVariable($key,$previousEnv[$key],'Process') }
+    Pop-Location
 }
-
-& npx.cmd concurrently --names $names --prefix-colors $colors @commands
-exit $LASTEXITCODE

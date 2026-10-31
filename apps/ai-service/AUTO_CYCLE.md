@@ -38,10 +38,10 @@ Model grading dan frame disimpan dalam cache terpisah.
 - Jalankan **satu proses/worker AI service** untuk satu instalasi kamera. Pengendali
   dan kepemilikan siklus berada dalam memori proses tersebut.
 - UI menggunakan `VITE_AI_SERVICE_URL` atau `sugarcaneDesktop.aiServiceUrl` yang sudah
-  tersedia, default `http://127.0.0.1:8010`. Untuk akses dari komputer lain, URL tersebut
+  tersedia, default `http://127.0.0.1:8011`. Untuk akses dari komputer lain, URL tersebut
   harus dapat dijangkau browser (dan HTTPS jika dashboard memakai HTTPS).
 - AI service memvalidasi token dan akses kamera melalui API lokal. Alamat default
-  `http://127.0.0.1:4110`, mengikuti `API_PORT`/`BACKEND_PORT`; override menggunakan
+  `http://127.0.0.1:4111`, mengikuti `API_PORT`/`BACKEND_PORT`; override menggunakan
   `AUTO_CYCLE_API_URL` jika API berada pada host lain. Admin direksi tetap tidak dapat
   mengubah kontrol siklus.
 - Selesaikan siklus manual sebelum mengaktifkan Auto. Error database saat penyelesaian

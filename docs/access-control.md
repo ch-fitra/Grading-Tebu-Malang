@@ -25,4 +25,6 @@ POST   /api/users
 PATCH  /api/users/:id
 ```
 
-Migration: `database/postgres/002_rbac.sql` dan `003_role_visibility.sql`. Jalankan `npm run db:migrate` setelah memperbarui project. Backend tidak lagi memakai data memory atau endpoint inferensi contoh: PostgreSQL wajib aktif. Untuk instalasi lokal baru, akun bootstrap sementara adalah `developer/developer` dan `admin/admin`; ubah lewat `.env` sebelum pertama kali dijalankan. Untuk produksi, isi secret dan password kuat, aktifkan `DATABASE_REQUIRED=true`, TLS, reverse proxy, rate limiting, serta audit log.
+Migration: `database/postgres/002_rbac.sql` dan `003_role_visibility.sql`. Jalankan `npm run db:migrate` setelah memperbarui project. Backend tidak lagi memakai data memory atau endpoint inferensi contoh: PostgreSQL wajib aktif. Akun bootstrap hanya dibuat jika password diisi melalui `.env`; tidak ada password login bawaan. Semua akun pada instalasi ini mengakses PG Kebon Agung sesuai izin role, tanpa pemilihan pabrik berdasarkan username. Untuk produksi, isi secret dan password kuat, aktifkan `DATABASE_REQUIRED=true`, TLS, reverse proxy, rate limiting, serta audit log.
+
+Menu **Konfigurasi Kamera** tersedia dengan `camera.read`. Tambah/edit/hapus/aktif/nonaktif/uji koneksi memerlukan `camera.write`. Pengguna dengan `camera.read`, termasuk Operator/Viewer, dapat membuka link RTSP lengkap melalui Lihat RTSP. Link dimasking pada daftar; perubahan tetap memerlukan `camera.write`. Penghapusan kamera yang memiliki riwayat ditolak; gunakan Nonaktifkan.

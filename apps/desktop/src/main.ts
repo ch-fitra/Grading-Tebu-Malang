@@ -17,8 +17,8 @@ async function createWindow() {
   // Development uses the same live React app as the browser. Packaged apps
   // always use the bundled web build, independently of development variables.
   const devUrl = app.isPackaged ? undefined : process.env.SUGARCANE_WEB_DEV_URL;
-  if (devUrl && devUrl !== "http://127.0.0.1:5175") {
-    throw new Error("Alamat UI pengembangan desktop harus http://127.0.0.1:5175");
+  if (devUrl && devUrl !== "http://127.0.0.1:5176") {
+    throw new Error("Alamat UI pengembangan desktop harus http://127.0.0.1:5176");
   }
   const indexPath = rendererPath();
   const clientConfig = desktopClientConfig();
@@ -36,7 +36,7 @@ async function createWindow() {
     height: 860,
     minWidth: 1024,
     minHeight: 720,
-    title: "Tebu AI",
+    title: "Tebu AI - PG Kebon Agung",
     backgroundColor: "#f5f8f5",
     autoHideMenuBar: true,
     show: false,
@@ -61,6 +61,9 @@ async function createWindow() {
   window.once("ready-to-show", () => window.show());
   await window.loadURL(rendererUrl);
 }
+
+app.setName("TebuAI Malang");
+app.setPath("userData", path.join(app.getPath("appData"), "TebuAI-Malang"));
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);

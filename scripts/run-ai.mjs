@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import dotenv from 'dotenv';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const python=path.join(root,'.venv/Scripts/python.exe');
+if(!fs.existsSync(python))throw new Error('Buat .venv Malang dan pasang requirements terlebih dahulu.');
+const child=spawn(python,['-m','uvicorn','main:app','--app-dir',path.join(root,'apps/ai-service'),'--host','127.0.0.1','--port','8011'],{cwd:root,env:{...process.env,...dotenv.parse(fs.readFileSync(path.join(root,'.env')))},stdio:'inherit',windowsHide:true});
+process.once('SIGINT',()=>child.kill());process.once('SIGTERM',()=>child.kill());
+child.once('error',error=>{console.error(error.message);process.exitCode=1;});
+child.once('exit',code=>{process.exitCode=code??1;});

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { pool, transaction } from "./db.js";
 import type { ClassPercentages, Grade } from "./rule-engine.js";
 
-export type Camera = { id: number; name: string; rtspUrl: string; location: string; status: "online" | "offline"; createdAt: string };
+export type Camera = { id: number; name: string; rtspUrl: string; location: string; status: "online" | "offline"; station: number; enabled: boolean; createdAt: string };
 export type AiModel = { id: number; name: string; version: string; path: string; active: boolean; createdAt: string };
 export type InferenceResult = { id: number; timestamp: string; cameraId: number; classes: Required<Pick<ClassPercentages, "daun" | "pucuk" | "sampah">>; impurityMeasured?: boolean; classScores?: Partial<Record<Grade, number>>; grade: Grade; confidence: number; snapshot: string | null };
 export type DeletionRequest = {
@@ -14,7 +14,7 @@ export type DeletionRequest = {
   targetTitle: string;
   targetSubtitle?: string;
   snapshotPath?: string;
-  factory: "trangkil" | "kebonagung" | "all";
+  factory: "kebonagung";
   requestedBy: string;
   requestedAt: string;
   reason: string;
@@ -25,7 +25,7 @@ export type DeletionRequest = {
   reviewNotes?: string;
 };
 
-const cameraRow = (r: Record<string, unknown>): Camera => ({ id: Number(r.id), name: String(r.name), rtspUrl: String(r.rtsp_url), location: String(r.location ?? ""), status: r.status as Camera["status"], createdAt: new Date(String(r.created_at)).toISOString() });
+const cameraRow = (r: Record<string, unknown>): Camera => ({ id: Number(r.id), name: String(r.name), rtspUrl: String(r.rtsp_url), location: String(r.location ?? ""), status: r.status as Camera["status"], station: Number(r.station), enabled: Boolean(r.enabled), createdAt: new Date(String(r.created_at)).toISOString() });
 const modelRow = (r: Record<string, unknown>): AiModel => ({ id: Number(r.id), name: String(r.name), version: String(r.version), path: String(r.path), active: Boolean(r.active), createdAt: new Date(String(r.created_at)).toISOString() });
 const inferenceRow = (r: Record<string, unknown>): InferenceResult => ({ id: Number(r.id), timestamp: new Date(String(r.created_at)).toISOString(), cameraId: Number(r.camera_id ?? 0), classes: { daun: Number(r.daun_percent), pucuk: Number(r.pucuk_percent), sampah: Number(r.sampah_percent) }, impurityMeasured: r.impurity_measured === true, grade: r.grade as Grade, confidence: Number(r.confidence), snapshot: r.snapshot_path ? String(r.snapshot_path) : null });
 
@@ -46,13 +46,8 @@ async function withDetectedClasses(rows: InferenceResult[]): Promise<InferenceRe
   });
 }
 
-export const DEFAULT_CAMERAS: Omit<Camera, "createdAt">[] = [
-  { id: 1, name: "MBS 1 - PT Kebon Agung (Malang)", rtspUrl: process.env.CCTV_KEBONAGUNG_RTSP_URL ?? "", location: "PG Kebon Agung (Malang)", status: "online" },
-  { id: 2, name: "MBS 5 - PT Trangkil (Wisenet Meja 5)", rtspUrl: process.env.CCTV_TRANGKIL_RTSP_URL ?? "", location: "PG Trangkil (Pati)", status: "online" }
-];
-
 export const DEFAULT_MODELS: Omit<AiModel, "createdAt">[] = [
-  { id: 1, name: "Tebu Segmentation V1", version: "1.0.0", path: "models/active/model.onnx", active: true }
+  { id: 1, name: "Sugarcane Quality Keras Model", version: "0.0.1", path: "apps/ai-service/models/active/v0.0.1.sugarcane.keras", active: true }
 ];
 
 export const store = {
@@ -60,10 +55,7 @@ export const store = {
     await pool.query("SELECT 1");
     await pool.query("CREATE TABLE IF NOT EXISTS ai_capture_sync (id integer PRIMARY KEY CHECK (id=1), last_ai_id bigint NOT NULL DEFAULT 0)");
     await pool.query("INSERT INTO ai_capture_sync(id,last_ai_id) VALUES(1,0) ON CONFLICT DO NOTHING");
-    // Seed missing defaults without removing or replacing configured cameras.
-    for (const camera of DEFAULT_CAMERAS) {
-      await pool.query("INSERT INTO cameras(id,name,rtsp_url,location,status) VALUES($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING", [camera.id, camera.name, camera.rtspUrl, camera.location, camera.status]);
-    }
+    // Cameras and RTSP URLs are managed exclusively in PostgreSQL through camera CRUD.
     for (const model of DEFAULT_MODELS) {
       await pool.query("INSERT INTO ai_models(id,name,version,path,active) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [model.id, model.name, model.version, model.path, model.active]);
     }
@@ -75,14 +67,11 @@ export const store = {
   async listCameras(): Promise<Camera[]> {
     return (await pool.query("SELECT * FROM cameras ORDER BY id")).rows.map(cameraRow);
   },
-  async createCamera(camera: Omit<Camera, "id" | "createdAt" | "status"> & { id?: number }) {
-    const result = camera.id === undefined
-      ? await pool.query("INSERT INTO cameras(name,rtsp_url,location,status) VALUES($1,$2,$3,'online') RETURNING *", [camera.name, camera.rtspUrl, camera.location])
-      : await pool.query("INSERT INTO cameras(id,name,rtsp_url,location,status) VALUES($1,$2,$3,$4,'online') RETURNING *", [camera.id, camera.name, camera.rtspUrl, camera.location]);
-    return cameraRow(result.rows[0]);
+  async createCamera(camera: Omit<Camera, "id" | "createdAt" | "status">) {
+    return cameraRow((await pool.query("INSERT INTO cameras(name,rtsp_url,location,status,station,enabled) VALUES($1,$2,$3,'offline',$4,$5) RETURNING *", [camera.name, camera.rtspUrl, camera.location, camera.station, camera.enabled])).rows[0]);
   },
   async updateCamera(id: number, patch: Partial<Omit<Camera, "id" | "createdAt">>) {
-    const result = await pool.query("UPDATE cameras SET name=COALESCE($2,name),rtsp_url=COALESCE($3,rtsp_url),location=COALESCE($4,location),status=COALESCE($5,status),updated_at=NOW() WHERE id=$1 RETURNING *", [id, patch.name, patch.rtspUrl, patch.location, patch.status]);
+    const result = await pool.query("UPDATE cameras SET name=COALESCE($2,name),rtsp_url=COALESCE($3,rtsp_url),location=COALESCE($4,location),station=COALESCE($5,station),enabled=COALESCE($6,enabled),updated_at=NOW() WHERE id=$1 RETURNING *", [id, patch.name, patch.rtspUrl, patch.location, patch.station, patch.enabled]);
     return result.rowCount ? cameraRow(result.rows[0]) : null;
   },
   async deleteCamera(id: number) {
@@ -163,8 +152,8 @@ export const store = {
     await pool.query("DELETE FROM inference_results WHERE ($1::bigint[] IS NULL OR camera_id=ANY($1))", [cameraIds ?? null]);
     return true;
   },
-  async listDeletionRequests(factory?: "trangkil" | "kebonagung" | "all"): Promise<DeletionRequest[]> {
-    const result = await pool.query("SELECT payload FROM deletion_requests WHERE ($1::text IS NULL OR payload->>'factory'=$1) ORDER BY created_at DESC", [!factory || factory === "all" ? null : factory]);
+  async listDeletionRequests(factory?: "kebonagung"): Promise<DeletionRequest[]> {
+    const result = await pool.query("SELECT payload FROM deletion_requests WHERE ($1::text IS NULL OR payload->>'factory'=$1) ORDER BY created_at DESC", [factory ?? "kebonagung"]);
     return result.rows.map(row => row.payload as DeletionRequest);
   },
   async createDeletionRequest(input: Omit<DeletionRequest, "id" | "status" | "requestedAt">) {
@@ -172,12 +161,12 @@ export const store = {
     await pool.query("INSERT INTO deletion_requests(id,payload) VALUES($1,$2)", [record.id, record]);
     return record;
   },
-  async reviewDeletionRequest(id: string, decision: "approved" | "rejected", reviewer: string, reviewNotes?: string, factory: "trangkil" | "kebonagung" | "all" = "all") {
+  async reviewDeletionRequest(id: string, decision: "approved" | "rejected", reviewer: string, reviewNotes?: string, factory: "kebonagung" = "kebonagung") {
     return transaction(async client => {
       const found = await client.query("SELECT payload FROM deletion_requests WHERE id=$1 FOR UPDATE", [id]);
       if (!found.rowCount) return null;
       const record = found.rows[0].payload as DeletionRequest;
-      if (factory !== "all" && record.factory !== factory) return null;
+      if (record.factory !== factory) return null;
       if (record.status !== "pending") throw Object.assign(new Error("Permohonan sudah ditinjau"), { statusCode: 409 });
       if (decision === "approved") {
         if (record.targetType === "inference") await client.query("DELETE FROM inference_results WHERE id=$1", [Number(record.targetId)]);
@@ -187,8 +176,7 @@ export const store = {
           await client.query("DELETE FROM truck_inspections WHERE id=$1", [record.targetId]);
         }
         if (record.targetType === "all_inferences") {
-          if (record.factory === "all") await client.query("DELETE FROM inference_results");
-          else await client.query("DELETE FROM inference_results WHERE camera_id IN (SELECT id FROM cameras WHERE lower(name || ' ' || location) ~ $1)", [record.factory === "trangkil" ? "trangkil" : "kebon agung|malang"]);
+          await client.query("DELETE FROM inference_results");
         }
       }
       const reviewed: DeletionRequest = { ...record, status: decision, reviewedBy: reviewer, reviewedAt: new Date().toISOString(), reviewNotes };

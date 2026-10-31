@@ -46,7 +46,7 @@ export type AppState = {
 
 function readSession(): Session | null {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem("tebu-session") ?? "null");
+    const value: unknown = JSON.parse(localStorage.getItem("tebu-malang-session") ?? "null");
     if (!value || typeof value !== "object") return null;
     const session = value as Session;
     return typeof session.token === "string" && Array.isArray(session.user?.permissions) ? session : null;
@@ -56,11 +56,11 @@ function readSession(): Session | null {
 // Old browser-only inspections remain visible. New inspections always use PostgreSQL.
 function legacySessions(): TruckInspectionSession[] {
   try {
-    const value: unknown = JSON.parse(localStorage.getItem("tebu-truck-sessions") ?? "[]");
+    const value: unknown = JSON.parse(localStorage.getItem("tebu-malang-truck-sessions") ?? "[]");
     return Array.isArray(value) ? value.filter((item): item is TruckInspectionSession => typeof item?.id === "string" && item.id.startsWith("session_")) : [];
   } catch { return []; }
 }
-function saveLegacy(sessions: TruckInspectionSession[]) { localStorage.setItem("tebu-truck-sessions", JSON.stringify(sessions)); }
+function saveLegacy(sessions: TruckInspectionSession[]) { localStorage.setItem("tebu-malang-truck-sessions", JSON.stringify(sessions)); }
 
 let refreshVersion = 0;
 let appliedRefreshVersion = 0;
@@ -69,13 +69,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   session: readSession(), latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [],
   login: async (username, password) => {
     const session = await api<Session>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
-    localStorage.setItem("tebu-session", JSON.stringify(session));
+    localStorage.setItem("tebu-malang-session", JSON.stringify(session));
     set({ session });
     await get().refresh();
   },
   logout: () => {
     void api("/api/auth/logout", { method: "POST" }).catch(() => {});
-    localStorage.removeItem("tebu-session");
+    localStorage.removeItem("tebu-malang-session");
     set({ session: null, latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [] });
   },
   validateSession: async () => {
@@ -85,7 +85,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const user = await api<Session["user"]>("/api/auth/me");
       if (get().session?.token !== current.token) return;
       const session = { ...current, user };
-      localStorage.setItem("tebu-session", JSON.stringify(session));
+      localStorage.setItem("tebu-malang-session", JSON.stringify(session));
       set({ session });
       await get().refresh();
     } catch (error) {
@@ -115,7 +115,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // in order, rather than discarding every response on a slower connection.
     if (get().session !== current || version < appliedRefreshVersion) return;
     appliedRefreshVersion = version;
-    const trucks = [...(backendTrucks ?? get().truckSessions.filter(item => !item.id.startsWith("session_"))), ...legacySessions()];
+    const cameraIds = new Set((cameras ?? get().cameras).map(camera => camera.id));
+    const trucks = [...(backendTrucks ?? get().truckSessions.filter(item => !item.id.startsWith("session_"))), ...legacySessions()].filter(truck => cameraIds.has(truck.line));
     set({
       latest: latest === undefined ? get().latest : latest,
       history: history ?? get().history,

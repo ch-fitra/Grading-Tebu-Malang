@@ -1,7 +1,7 @@
 import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
-import { findFactoryCamera } from "../utils/stations";
-import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, Building2, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
+import { findStationCamera } from "../utils/stations";
+import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
 import { InferenceResult, Grade } from "../types";
@@ -9,8 +9,6 @@ import { api, aiApi, backendUrl, getCameraStreamUrl } from "../utils/api";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
-
-export type FactoryKey = "trangkil" | "kebonagung";
 
 type AutoCycleStatus = {
   camera_id: number;
@@ -33,56 +31,6 @@ type DetectionPage = {
   page_size: number;
   pages: number;
 };
-
-interface FactoryDefinition {
-  id: FactoryKey;
-  name: string;
-  fullName: string;
-  city: string;
-  shortName: string;
-  lines: {
-    line: number;
-    title: string;
-    subtext: string;
-    locked?: boolean;
-  }[];
-}
-
-const FACTORIES: Record<FactoryKey, FactoryDefinition> = {
-  trangkil: {
-    id: "trangkil",
-    name: "PT Trangkil (Pati)",
-    fullName: "Pabrik Gula Trangkil",
-    city: "Pati, Jawa Tengah",
-    shortName: "PG Trangkil",
-    lines: [
-      { line: 1, title: "MBS 1", subtext: "Meja Tebu 1", locked: true },
-      { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", locked: true },
-      { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", locked: true },
-      { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", locked: true },
-      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5 (Wisenet)", locked: false },
-    ]
-  },
-  kebonagung: {
-    id: "kebonagung",
-    name: "PT Kebon Agung (Malang)",
-    fullName: "Pabrik Gula Kebon Agung",
-    city: "Malang, Jawa Timur",
-    shortName: "PG Kebon Agung",
-    lines: [
-      { line: 1, title: "MBS 1", subtext: "Meja Tebu 1 (Utama)", locked: false },
-      { line: 2, title: "MBS 2", subtext: "Meja Tebu 2", locked: false },
-      { line: 3, title: "MBS 3", subtext: "Meja Tebu 3", locked: false },
-      { line: 4, title: "MBS 4", subtext: "Meja Tebu 4", locked: false },
-      { line: 5, title: "MBS 5", subtext: "Meja Tebu 5", locked: false },
-    ]
-  }
-};
-
-function getDefaultLine(factoryKey: FactoryKey): number {
-  const unlocked = FACTORIES[factoryKey]?.lines.find((l) => !l.locked);
-  return unlocked ? unlocked.line : (factoryKey === "trangkil" ? 5 : 1);
-}
 
 // Mini donut chart SVG component with Gemini fluid gradient
 function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size?: number; color?: string; strokeWidth?: number }) {
@@ -111,7 +59,7 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
@@ -145,24 +93,9 @@ export function DashboardPage() {
       .map(r => Number(r.targetId))
   ), [deletionRequests]);
 
-  const userFactory: FactoryKey | null = (() => {
-    const username = (session?.user.username || "").toLowerCase();
-    if (username.includes("kebonagung") || username.includes("malang")) return "kebonagung";
-    if (username.includes("trangkil")) return "trangkil";
-    return null;
-  })();
-
-  const isFactoryLocked = userFactory !== null;
-
-  const initialFactory: FactoryKey = (() => {
-    if (userFactory) return userFactory;
-    const saved = localStorage.getItem("active-factory") as FactoryKey | null;
-    if (saved === "trangkil" || saved === "kebonagung") return saved;
-    return "kebonagung";
-  })();
-
-  const [activeFactory, setActiveFactory] = useState<FactoryKey>(initialFactory);
-  const [activeLine, setActiveLine] = useState<number>(() => getDefaultLine(initialFactory));
+  const activeFactory = "kebonagung";
+  const [activeLine, setActiveLine] = useState(2);
+  const [streamDimensions, setStreamDimensions] = useState<{ cameraId: number; width: number; height: number } | null>(null);
   const [capturePage, setCapturePage] = useState(1);
   const [dashboardPane, setDashboardPane] = useState("camera");
   const [eventPage, setEventPage] = useState(1);
@@ -209,16 +142,10 @@ export function DashboardPage() {
     const next = theme === "light" ? "dark" : "light";
     setTheme(next);
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("tebu-ui-theme", next);
+    localStorage.setItem("tebu-malang-ui-theme", next);
   };
 
-  // Strictly sync factory when session user changes
-  useEffect(() => {
-    if (userFactory) {
-      setActiveFactory(userFactory);
-      setActiveLine(getDefaultLine(userFactory));
-    }
-  }, [userFactory]);
+
 
   // Clock ticker
   useEffect(() => {
@@ -277,14 +204,24 @@ export function DashboardPage() {
   };
 
   const currentFactory = useMemo(() => ({
-    ...FACTORIES[activeFactory],
-    lines: FACTORIES[activeFactory].lines.map(line => ({
-      ...line,
-      cameraId: line.locked ? undefined : findFactoryCamera(cameras, activeFactory, line.line)?.id,
-    })),
-  }), [activeFactory, cameras]);
+    id: "kebonagung",
+    name: "PG Kebon Agung (Malang)",
+    fullName: "Pabrik Gula Kebon Agung",
+    city: "Malang, Jawa Timur",
+    shortName: "PG Kebon Agung",
+    lines: [...new Set([1, 2, 3, 4, 5, ...cameras.map(camera => camera.station)])].sort((a, b) => a - b).map(line => {
+      const camera = findStationCamera(cameras, line);
+      return { line, title: `MBS ${line}`, subtext: camera?.location || `Meja Tebu ${line}`, locked: !camera?.enabled, cameraId: camera?.id };
+    }),
+  }), [cameras]);
+  useEffect(() => {
+    if (!currentFactory.lines.some(line => line.line === activeLine && !line.locked)) {
+      const first = currentFactory.lines.find(line => line.line === 2 && !line.locked) ?? currentFactory.lines.find(line => !line.locked);
+      if (first) setActiveLine(first.line);
+    }
+  }, [currentFactory, activeLine]);
   const currentLineDef = currentFactory.lines.find((l) => l.line === activeLine);
-  const targetCameraId = currentLineDef?.cameraId;
+  const targetCameraId = currentLineDef?.locked ? undefined : currentLineDef?.cameraId;
   autoCameraRef.current = targetCameraId;
   const currentAutoMode = autoMode?.camera_id === targetCameraId ? autoMode : null;
   const autoEnabled = currentAutoMode?.enabled === true;
@@ -627,19 +564,11 @@ export function DashboardPage() {
   const effectiveInference = useMemo(() => {
     if (activeCycle && activeCycleFrames.length > 0) {
       const count = activeCycleFrames.length;
-      const sumDaun = activeCycleFrames.reduce((s, c) => s + c.classes.daun, 0);
-      const sumPucuk = activeCycleFrames.reduce((s, c) => s + c.classes.pucuk, 0);
-      const sumSampah = activeCycleFrames.reduce((s, c) => s + c.classes.sampah, 0);
-      const avgDaun = Math.round((sumDaun / count) * 10) / 10;
-      const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
-      const avgSampah = Math.round((sumSampah / count) * 10) / 10;
       const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
       return {
-        classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: avgConf,
         grade: dominantGrade(activeCycleFrames) ?? "M",
         classScores: meanClassScores(activeCycleFrames),
-        impurityMeasured: activeCycleFrames.every(frame => frame.impurityMeasured === true),
         id: activeCycleFrames[0]?.id || 0,
         timestamp: activeCycle.startedAt,
         cameraId: targetCameraId || 0,
@@ -651,18 +580,10 @@ export function DashboardPage() {
 
     if (cycleModelFrames.length > 0) {
       const count = cycleModelFrames.length;
-      const sumDaun = cycleModelFrames.reduce((s, c) => s + c.classes.daun, 0);
-      const sumPucuk = cycleModelFrames.reduce((s, c) => s + c.classes.pucuk, 0);
-      const sumSampah = cycleModelFrames.reduce((s, c) => s + c.classes.sampah, 0);
-      const avgDaun = Math.round((sumDaun / count) * 10) / 10;
-      const avgPucuk = Math.round((sumPucuk / count) * 10) / 10;
-      const avgSampah = Math.round((sumSampah / count) * 10) / 10;
       return {
-        classes: { daun: avgDaun, pucuk: avgPucuk, sampah: avgSampah },
         confidence: cycleModelFrames.reduce((sum, frame) => sum + frame.confidence, 0) / count,
         grade: dominantGrade(cycleModelFrames) ?? "M",
         classScores: meanClassScores(cycleModelFrames),
-        impurityMeasured: cycleModelFrames.every(frame => frame.impurityMeasured === true),
         id: cycleModelFrames[0]?.id || 0,
         timestamp: selectedCycle?.startedAt ?? cycleModelFrames[0].timestamp,
         cameraId: targetCameraId || 0,
@@ -694,11 +615,6 @@ export function DashboardPage() {
       return t >= new Date(c.startedAt).getTime() - 1000 && t <= (c.completedAt ? new Date(c.completedAt).getTime() + 1000 : Date.now());
     })).length;
 
-    // Average impurity across all cycles
-    const avgImpurity = cycles.length > 0
-      ? cycles.reduce((acc, c) => acc + (c.averageImpurity || 0), 0) / cycles.length
-      : 0;
-
     const avgConfidence = cycles.length > 0
       ? cycles.reduce((acc, c) => acc + (c.averageConfidence ?? 0), 0) / cycles.length
       : 0.88;
@@ -706,7 +622,7 @@ export function DashboardPage() {
     const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? "M";
 
     // Hitung distribusi kelas dari seluruh siklus
-    const gradeCounts = TRANGKIL_GRADES.map((tg) => {
+    const gradeCounts = KEBONAGUNG_GRADES.map((tg) => {
       const count = cycles.filter(c => {
         const cGrade = cycleGrade(c);
         return cGrade === tg.code;
@@ -726,7 +642,7 @@ export function DashboardPage() {
     // List siklus berurutan dengan info grade dan impuritas masing-masing
     const cycleTimeline = cycles.map((c, idx) => {
       const cGrade = cycleGrade(c);
-      const gradeDef = TRANGKIL_GRADES.find(g => g.code === cGrade) || TRANGKIL_GRADES[1];
+      const gradeDef = KEBONAGUNG_GRADES.find(g => g.code === cGrade) || KEBONAGUNG_GRADES[1];
       return {
         id: c.id,
         number: idx + 1,
@@ -734,8 +650,6 @@ export function DashboardPage() {
         startedAt: c.startedAt,
         completedAt: c.completedAt,
         frames: analysisFrames.filter(item => { const t = new Date(item.timestamp).getTime(); return t >= new Date(c.startedAt).getTime() - 1000 && t <= (c.completedAt ? new Date(c.completedAt).getTime() + 1000 : Date.now()); }).length,
-        impurity: Math.round((c.averageImpurity || 0) * 10) / 10,
-        impurityMeasured: c.impurityMeasured === true,
         grade: cGrade,
         gradeDef,
         decision: c.finalDecision,
@@ -747,8 +661,6 @@ export function DashboardPage() {
       totalCycles,
       completedCount: completedCycles.length,
       totalFrames,
-      avgImpurity: Math.round(avgImpurity * 10) / 10,
-      impurityMeasured: cycles.length > 0 && cycles.every(c => c.impurityMeasured === true),
       avgConfidence,
       overallGrade,
       passPct,
@@ -774,17 +686,17 @@ export function DashboardPage() {
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
 
   // Model scores are persisted percentages; no invented neighbouring probabilities.
-  const gradeDistribution = useMemo(() => TRANGKIL_GRADES.map(item => ({
+  const gradeDistribution = useMemo(() => KEBONAGUNG_GRADES.map(item => ({
     ...item,
     prob: hasLatestInference ? Math.round(effectiveInference?.classScores?.[item.code] ??
       (item.code === grade ? gradeConf * 100 : 0)) : 0
   })), [effectiveInference, grade, gradeConf, hasLatestInference]);
 
-  // Statistik Konsistensi Siklus Meja Tebu (7 Kelas PT Trangkil)
+  // Statistik Konsistensi Siklus Meja Tebu (7 Kelas PG Kebon Agung)
   const cycleConsistency = useMemo(() => {
     if (!cycleModelFrames || cycleModelFrames.length === 0) return null;
     const total = cycleModelFrames.length;
-    const counts = TRANGKIL_GRADES.map(tg => ({
+    const counts = KEBONAGUNG_GRADES.map(tg => ({
       code: tg.label,
       rawCode: tg.code,
       color: tg.color,
@@ -848,7 +760,7 @@ export function DashboardPage() {
   }, [lineCycles, activeLineHistory, targetCameraId, history]);
 
   const isAiOnline = status?.ai.status === "ok";
-  const cameraLive = targetCameraId === 1 ? status?.ai.camera_1_live : targetCameraId === 2 ? status?.ai.camera_2_live : false;
+  const cameraLive = targetCameraId ? status?.ai.cameras?.[String(targetCameraId)]?.live === true : false;
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
   return (
@@ -856,47 +768,10 @@ export function DashboardPage() {
       {/* ─── Top Station Header ─── */}
       <div className="stationHeader">
         <div className="stationHeaderLeft">
-          {isFactoryLocked ? (
-            currentFactory.id === "trangkil" ? (
-              <div className="stationLogoBadge" title="Pabrik Gula Trangkil (Pati)">
-                <img
-                  src="/logo-trangkil.png"
-                  alt="Pabrik Gula Trangkil"
-                  className="stationTrangkilLogo"
-                />
-                <span className="stationFactoryCity">Pati, Jawa Tengah</span>
-              </div>
-            ) : (
-              <div className="stationFactoryId">
-                <Building2 size={16} />
-                <span className="stationFactoryName">{currentFactory.name}</span>
-                <span className="stationFactoryCity">{currentFactory.city}</span>
-              </div>
-            )
-          ) : (
-            <div className="stationFactorySwitcher">
-              {(Object.keys(FACTORIES) as FactoryKey[]).map((fKey) => {
-                const f = FACTORIES[fKey];
-                const isSelected = activeFactory === fKey;
-                return (
-                  <button
-                    key={fKey}
-                    type="button"
-                    className={`stationFactoryBtn ${isSelected ? "active" : ""}`}
-                    onClick={() => {
-                      setActiveFactory(fKey);
-                      localStorage.setItem("active-factory", fKey);
-                      setActiveLine(getDefaultLine(fKey));
-                    }}
-                  >
-                    <Building2 size={13} />
-                    <span>{f.shortName}</span>
-                    {isSelected && <span className="stationActiveDot" />}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <div className="stationLogoBadge" title="PT Kebon Agung - Unit PG Kebon Agung (Malang)">
+            <img src={`${import.meta.env.BASE_URL}logo-pg-kebonagung.svg`} alt="Pabrik Gula Kebon Agung" className="stationKebonAgungLogo" />
+            <span className="stationFactoryCity">Malang, Jawa Timur</span>
+          </div>
 
           <select className="responsiveMbsSelect" aria-label="Pilih meja tebu" value={activeLine} onChange={event => setActiveLine(Number(event.target.value))}>
             {currentFactory.lines.map(item => <option key={item.line} value={item.line} disabled={Boolean(item.locked)}>{item.title}</option>)}
@@ -972,7 +847,7 @@ export function DashboardPage() {
             type="button"
             className="stationHeaderActionBtn"
             onClick={() => setIsSyncModalOpen(true)}
-            title="Upload Excel Pabrik & Rekonsiliasi Data Antrean PT Trangkil"
+            title="Upload Excel Pabrik & Rekonsiliasi Data Antrean PG Kebon Agung"
           >
             <FileSpreadsheet size={13} />
             <span>Upload Excel Pabrik</span>
@@ -1050,7 +925,8 @@ export function DashboardPage() {
             </div>
 
             {/* Video area */}
-            <div className={`streamVideoArea ${isFullscreen ? "fullscreenMode" : ""}`} ref={streamCanvasRef}>
+            <div className={`streamVideoArea ${isFullscreen ? "fullscreenMode" : ""}`} ref={streamCanvasRef}
+              style={!isFullscreen ? { aspectRatio: streamDimensions && streamDimensions.cameraId === targetCameraId ? `${streamDimensions.width} / ${streamDimensions.height}` : "16 / 9" } : undefined}>
               {targetCameraId && isStreaming ? (
                 <div className="streamVideoContainer">
                   <img
@@ -1059,7 +935,16 @@ export function DashboardPage() {
                     alt={`Live Stream ${currentFactory.name} MBS ${activeLine}`}
                     className="liveStreamImg"
                     onError={event => { event.currentTarget.style.visibility = "hidden"; handleStreamError(); }}
-                    onLoad={event => { event.currentTarget.style.visibility = "visible"; handleStreamLoad(); }}
+                    onLoad={event => {
+                      const image = event.currentTarget;
+                      image.style.visibility = "visible";
+                      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                        const width = image.naturalWidth;
+                        const height = image.naturalHeight;
+                        setStreamDimensions(previous => previous?.cameraId === targetCameraId && previous.width === width && previous.height === height ? previous : { cameraId: targetCameraId, width, height });
+                      }
+                      handleStreamLoad();
+                    }}
                   />
                   <div className="streamOverlayTag">
                     {currentFactory.shortName} • MBS {activeLine}
@@ -1092,7 +977,7 @@ export function DashboardPage() {
             </div>
 
             {isAdmin ? (
-              /* ─── Mode Pengawasan Mutu & Tata Kelola Direksi (Style Platform PG Trangkil) ─── */
+              /* ─── Mode Pengawasan Mutu & Tata Kelola Direksi (Style Platform PG Kebon Agung) ─── */
               <>
                 {/* 1. Bar Pengawasan Mutu & Otorisasi 2FA (Menggantikan Kontrol Siklus Fisik Operator) */}
                 <div className="streamAdminOversightBar">
@@ -1264,19 +1149,16 @@ export function DashboardPage() {
                 <span className="colTime">Waktu</span>
                 <span className="colBatch">Frame</span>
                 <span className="colGrade">Mutu</span>
-                <span className="colImp">Kotoran</span>
                 <span className="colConf">Akurasi</span>
               </div>
             )}
 
-            <div className="eventFeedList">
+            <div className={`eventFeedList${visibleEvents.length ? " hasEvents" : ""}`}>
               {visibleEvents.map((item) => {
-                const itemImpurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                 const normG = normalizeGrade(item.grade);
                 const gradeColor = (normG === "S" || normG === "M" || normG === "A") ? "eventGradeBlueBright" :
                   normG === "B" ? "eventGradeBlue" :
                   normG === "D" ? "eventGradeSlate" : "eventGradeBlack";
-                const barColor = itemImpurity <= 5 ? "#2563eb" : itemImpurity <= 10 ? "#0284c7" : itemImpurity <= 15 ? "#f59e0b" : "#ef4444";
                 const confPercent = Math.round((item.confidence ?? 0) * 100);
 
                 return (
@@ -1292,18 +1174,6 @@ export function DashboardPage() {
                     </span>
                     <span className="eventFeedId">{item.frameNumber}</span>
                     <span className={`eventFeedGrade ${gradeColor}`}>MBS {item.grade}</span>
-                    <div className="eventFeedImpWrapper">
-                      <span className="eventFeedImpurity">{item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"}</span>
-                      <div className="eventFeedMiniBar">
-                        <div
-                          className="eventFeedMiniBarFill"
-                          style={{
-                            width: `${item.impurityMeasured ? Math.min(100, (itemImpurity / 20) * 100) : 0}%`,
-                            background: barColor
-                          }}
-                        />
-                      </div>
-                    </div>
                     <span className="eventFeedConf">{confPercent}%</span>
                   </button>
                 );
@@ -1572,10 +1442,6 @@ export function DashboardPage() {
                     </span>
                     <span>•</span>
                     <span>
-                      Rata-rata Kotoran: <strong>{selectedCycle.impurityMeasured ? `${selectedCycle.averageImpurity.toFixed(1)}%` : "Tidak diukur"}</strong>
-                    </span>
-                    <span>•</span>
-                    <span>
                       Akurasi AI: <strong>{Math.round((selectedCycle.averageConfidence ?? 0) * 100)}%</strong>
                     </span>
                   </div>
@@ -1594,7 +1460,6 @@ export function DashboardPage() {
 
             <div className="capturePhotoGrid" ref={captureGridRef} style={{ gridTemplateColumns: `repeat(${captureColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${captureRows}, minmax(0, 1fr))` }}>
               {visibleCaptures.map((item) => {
-                const itemImpurity = item.classes.daun + item.classes.pucuk + item.classes.sampah;
                 const normG = normalizeGrade(item.grade);
                 const gradeColor = (normG === "S" || normG === "M" || normG === "A") ? "photo-grade-blue-bright" :
                   normG === "B" ? "photo-grade-blue" :
@@ -1625,7 +1490,6 @@ export function DashboardPage() {
                         </div>
                       )}
                       <span className={`photoGradeBadge ${gradeColor}`}>MBS {item.grade}</span>
-                      <span className="photoImpBadge">{item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"}</span>
                       {pendingInferenceIds.has(item.id) && (
                         <span style={{
                           position: "absolute",
@@ -1658,7 +1522,7 @@ export function DashboardPage() {
                           if (isOperator) {
                             setRequestDeletionTarget({
                               id: item.id,
-                              title: `Frame #${item.id} (${item.impurityMeasured ? `${itemImpurity.toFixed(1)}%` : "Tidak diukur"} Kotoran • Grade ${item.grade})`,
+                              title: `Frame #${item.id} (Grade ${item.grade})`,
                               subtitle: `Waktu Rekam: ${item.timestamp || "Baru saja"}`,
                               snapshotPath: item.snapshot ? (item.snapshot.startsWith("http") ? item.snapshot : `${backendUrl}${item.snapshot}`) : undefined
                             });
@@ -1751,15 +1615,9 @@ export function DashboardPage() {
                 {/* KPI Row */}
                 <div className="catKpiRow">
                   <div className="catKpi">
-                    <span className="catKpiLabel">Toleransi Kotoran</span>
-                    <strong className={`catKpiValue ${normalizeGrade(grade) === "X" || normalizeGrade(grade) === "G" ? "danger" : normalizeGrade(grade) === "B" || normalizeGrade(grade) === "D" ? "amber" : "blue"}`}>
-                      {hasLatestInference ? TRANGKIL_GRADES.find(tg => tg.code === normalizeGrade(grade))?.tol || "—" : "—"}
-                    </strong>
-                  </div>
-                  <div className="catKpi">
                     <span className="catKpiLabel">Kebijakan Rafaksi</span>
                     <strong className={`catKpiValue ${normalizeGrade(grade) === "X" || normalizeGrade(grade) === "G" ? "danger" : normalizeGrade(grade) === "B" || normalizeGrade(grade) === "D" ? "amber" : "blue"}`}>
-                      {hasLatestInference ? TRANGKIL_GRADES.find(tg => tg.code === normalizeGrade(grade))?.rafaksi || "—" : "—"}
+                      {hasLatestInference ? KEBONAGUNG_GRADES.find(tg => tg.code === normalizeGrade(grade))?.rafaksi || "—" : "—"}
                     </strong>
                   </div>
                   <div className="catKpi">
@@ -1793,7 +1651,7 @@ export function DashboardPage() {
                       MBS {hasLatestInference ? normalizeGrade(grade) : "—"}
                     </div>
                     <span className="catGradeSub">
-                      {hasLatestInference ? (TRANGKIL_GRADES.find(tg => tg.code === normalizeGrade(grade))?.decision || "—") : "Menunggu pemindaian AI..."}
+                      {hasLatestInference ? (KEBONAGUNG_GRADES.find(tg => tg.code === normalizeGrade(grade))?.decision || "—") : "Menunggu pemindaian AI..."}
                     </span>
                   </div>
                 </div>
@@ -1866,7 +1724,7 @@ export function DashboardPage() {
                     </span>
                   </div>
                   <div className="cycleConsMiniBars">
-                    {(cycleConsistency?.counts || TRANGKIL_GRADES.map(tg => ({ code: tg.label, color: tg.color, count: 0 }))).map((c) => (
+                    {(cycleConsistency?.counts || KEBONAGUNG_GRADES.map(tg => ({ code: tg.label, color: tg.color, count: 0 }))).map((c) => (
                       <div key={c.code} className="consMiniItem">
                         <span>{c.code}</span>
                         <strong style={{ color: c.color }}>{c.count}</strong>
@@ -1913,10 +1771,6 @@ export function DashboardPage() {
                     <div className="dailyMetaStat">
                       <span>Total Frame:</span>
                       <strong>{dailyCyclesStats?.totalFrames || 0} frame</strong>
-                    </div>
-                    <div className="dailyMetaStat">
-                      <span>Avg Kotoran:</span>
-                      <strong>{dailyCyclesStats?.impurityMeasured ? `${dailyCyclesStats.avgImpurity}%` : "Tidak diukur"}</strong>
                     </div>
                     <div className="dailyMetaStat">
                       <span>Siklus Selesai:</span>
@@ -2022,7 +1876,6 @@ export function DashboardPage() {
                           </span>
                         </div>
                         <div className="dailyCycleItemRight">
-                          <span className="dailyCycleImpurity">{item.impurityMeasured ? `${item.impurity}% imp` : "Tidak diukur"}</span>
                           <span className={`dailyCycleGradeBadge grade-${item.grade.toLowerCase()}`}>
                             MBS {item.grade}
                           </span>
@@ -2043,7 +1896,7 @@ export function DashboardPage() {
       {/* ─── Capture Detail Modal ─── */}
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
-        const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
+        const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
         const confPercent = Math.round((selectedCapture.confidence ?? 0) * 100);
 
         const captureDate = new Date(selectedCapture.timestamp);
@@ -2069,7 +1922,7 @@ export function DashboardPage() {
                     <h2 id="modal-title">Detail Analisis Frame Capture</h2>
                     <span className="modal-batch-pill">Frame {frameNumber(selectedCapture.id)}</span>
                   </div>
-                  <p>Hasil pemindaian AI mutu tebu meja inspeksi • Standar Operasional PT Pabrik Gula Trangkil</p>
+                  <p>Hasil pemindaian AI mutu tebu meja inspeksi • Standar Operasional PT Pabrik Gula Kebon Agung</p>
                 </div>
                 <button
                   type="button"
@@ -2155,11 +2008,6 @@ export function DashboardPage() {
                     </div>
                     <div className="decision-metrics-row">
                       <div className="decision-metric">
-                        <span>Toleransi:</span>
-                        <strong>{curConfig.tol}</strong>
-                      </div>
-                      <div className="decision-metric-divider" />
-                      <div className="decision-metric">
                         <span>Kebijakan Rafaksi:</span>
                         <strong style={{ color: curConfig.color }}>{curConfig.rafaksi}</strong>
                       </div>
@@ -2200,11 +2048,11 @@ export function DashboardPage() {
                         <Layers size={13} />
                         <strong>DISTRIBUSI PROBABILITAS KELAS MUTU (AI)</strong>
                       </div>
-                      <span className="dist-card-sub">Standar 7 Kelas Mutu PG Trangkil</span>
+                      <span className="dist-card-sub">Referensi kelas mutu - validasi QC Malang</span>
                     </div>
 
                     <div className="dist-compact-list">
-                      {TRANGKIL_GRADES.map((item, idx) => {
+                      {KEBONAGUNG_GRADES.map((item, idx) => {
                         const isMatch = item.code === capGrade;
                         const prob = isMatch ? confPercent : Math.max(1, Math.round((100 - confPercent) / 6));
                         return (
@@ -2267,10 +2115,9 @@ export function DashboardPage() {
                       return;
                     }
                     if (isOperator) {
-                      const impPercent = ((selectedCapture.classes?.daun ?? 0) + (selectedCapture.classes?.pucuk ?? 0) + (selectedCapture.classes?.sampah ?? 0));
                       setRequestDeletionTarget({
                         id: selectedCapture.id,
-                        title: `Frame #${selectedCapture.id} (${selectedCapture.impurityMeasured ? `${impPercent.toFixed(1)}% Kotoran` : "Kotoran tidak diukur"} • Grade ${selectedCapture.grade})`,
+                        title: `Frame #${selectedCapture.id} (Grade ${selectedCapture.grade})`,
                         subtitle: `Waktu Rekam: ${selectedCapture.timestamp || "Baru saja"}`,
                         snapshotPath: selectedCapture.snapshot ? (selectedCapture.snapshot.startsWith("http") ? selectedCapture.snapshot : `${backendUrl}${selectedCapture.snapshot}`) : undefined
                       });

@@ -57,7 +57,7 @@ class _SettingsViewState extends State<SettingsView> {
         keyboardType: TextInputType.url,
         decoration: const InputDecoration(
           labelText: 'Alamat API',
-          hintText: 'http://10.0.2.2:4110',
+          hintText: 'http://10.0.2.2:4111',
         ),
       ),
       const SizedBox(height: 10),

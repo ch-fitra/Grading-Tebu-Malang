@@ -7,7 +7,7 @@ function argumentValue(prefix: string) {
 }
 
 contextBridge.exposeInMainWorld("sugarcaneDesktop", Object.freeze({
-  apiBaseUrl: argumentValue("--sugarcane-api-url=") ?? "http://127.0.0.1:4110",
-  websocketUrl: argumentValue("--sugarcane-websocket-url=") ?? "ws://127.0.0.1:4110/ws",
-  aiServiceUrl: argumentValue("--sugarcane-ai-service-url=") ?? "http://127.0.0.1:8010"
+  apiBaseUrl: argumentValue("--sugarcane-api-url=") ?? "http://127.0.0.1:4111",
+  websocketUrl: argumentValue("--sugarcane-websocket-url=") ?? "ws://127.0.0.1:4111/ws",
+  aiServiceUrl: argumentValue("--sugarcane-ai-service-url=") ?? "http://127.0.0.1:8011"
 }));

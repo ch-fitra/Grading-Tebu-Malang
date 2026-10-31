@@ -1,0 +1,155 @@
+/* The camera workspace fits its parent; additional rows use pagination. */
+.cameraConfigPage,
+.cameraConfigPage * { box-sizing: border-box; }
+.cameraConfigPage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow: hidden;
+  color: var(--color-text);
+}
+.cameraConfigPage .pageHeader {
+  position: static !important;
+  flex: 0 0 auto;
+  min-height: 64px;
+  padding: 10px 16px !important;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  gap: 16px;
+}
+.cameraConfigPage .pageHeader h1 { font-size: 21px; line-height: 1.2; }
+.cameraConfigPage .pageHeader .headerSubtitle { font-size: 11px; line-height: 1.4; }
+.cameraConfigPage .headerUtilityGroup { gap: 10px !important; }
+.cameraConfigPage .headerCustomActions { display: flex; }
+.cameraConfigPrimary, .cameraConfigSecondary, .cameraConfigToggle, .cameraConfigIcon {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font: inherit;
+  transition: background .15s;
+}
+.cameraConfigPrimary { border: 0; border-radius: 8px; color: #fff; background: #087bd5; padding: 10px 14px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cameraConfigPrimary:hover { background: #0665b1; }
+.cameraConfigPrimary.danger { background: #d93645; }
+.cameraConfigSecondary, .cameraConfigToggle { border: 1px solid var(--color-border); background: var(--color-surface-solid); color: inherit; border-radius: 7px; padding: 9px 12px; }
+.cameraConfigToggle { height: 30px; padding: 5px 8px; font-size: 11px; white-space: nowrap; }
+.cameraConfigIcon { width: 32px; height: 32px; padding: 0; flex-shrink: 0; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); background: var(--color-surface-solid); }
+.cameraConfigIcon:hover { background: var(--color-surface-muted); }
+.cameraConfigIcon.danger { color: #d93645; }
+.cameraConfigPage button:disabled { opacity: .45; cursor: not-allowed; }
+.cameraConfigPage button:focus-visible, .cameraConfigPage input:focus-visible { outline: 2px solid #51b8ff; outline-offset: 2px; }
+.cameraConfigStats { display: flex; align-items: center; flex: 0 0 auto; gap: 10px; min-width: 0; }
+.cameraConfigStats > div { display: flex; align-items: center; gap: 9px; border: 1px solid var(--color-border); background: var(--color-surface); border-radius: 9px; padding: 10px 14px; color: #1595df; }
+.cameraConfigStats strong { color: var(--color-text); font-size: 19px; line-height: 1; }
+.cameraConfigStats span { color: var(--color-muted); font-size: 12px; }
+.cameraConfigStats > p { margin: 0 0 0 auto; color: var(--color-muted); font-size: 12px; }
+.cameraConfigNotice, .cameraConfigError { display: flex; flex: 0 0 auto; gap: 9px; align-items: center; padding: 7px 12px; margin: 0; border-radius: 8px; font-size: 12px; line-height: 1.5; background: #e9f9f1; color: #08754f; border: 1px solid #a7dfc7; }
+.cameraConfigNotice > svg { flex-shrink: 0; }
+.cameraConfigNotice > span, .cameraConfigError > span { flex: 1; min-width: 0; }
+.cameraConfigNotice > button, .cameraConfigError > button { width: 26px; height: 26px; border: 0; background: transparent; color: inherit; }
+.cameraConfigNotice.warning { background: #fff7e2; color: #8b5b00; border-color: #f0d38a; }
+.cameraConfigError { background: #fff0f1; color: #b62839; border-color: #f4bcc4; }
+.cameraConfigPanel { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; }
+.cameraConfigToolbar { display: flex; flex: 0 0 auto; justify-content: space-between; align-items: center; gap: 16px; min-height: 56px; padding: 10px 14px; }
+.cameraConfigToolbar h3 { margin: 0; display: flex; align-items: center; gap: 9px; font-size: 14px; white-space: nowrap; }
+.cameraConfigToolbar h3 > svg { color: #1595df; }
+.cameraConfigToolbar h3 > span { color: #087bd5; background: #e4f4ff; padding: 2px 8px; border-radius: 20px; font-size: 11px; }
+.cameraConfigToolbar > div { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.cameraConfigSearch { display: flex; align-items: center; gap: 8px; height: 32px; min-width: 0; border: 1px solid var(--color-border); border-radius: 7px; padding: 0 10px; color: var(--color-muted); }
+.cameraConfigSearch input { width: 225px; min-width: 0; height: 30px !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0; outline: none; box-shadow: none !important; background: transparent !important; color: var(--color-text); font: inherit; font-size: 12px; }
+.cameraConfigSearch input:focus-visible { outline-offset: 0; }
+.cameraConfigTableWrap { flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+.cameraConfigTable { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; font-size: 12px; }
+.cameraConfigTable th { height: 40px; padding: 8px 12px; color: var(--color-muted); background: var(--color-surface-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.cameraConfigTable th:nth-child(1) { width: 24%; }
+.cameraConfigTable th:nth-child(2) { width: 9%; }
+.cameraConfigTable th:nth-child(3) { width: 14%; }
+.cameraConfigTable th:nth-child(4) { width: 19%; }
+.cameraConfigTable th:nth-child(5) { width: 15%; }
+.cameraConfigTable th:nth-child(6) { width: 19%; }
+.cameraConfigTable[data-readonly="true"] th:nth-child(1) { width: 30%; }
+.cameraConfigTable[data-readonly="true"] th:nth-child(2) { width: 12%; }
+.cameraConfigTable[data-readonly="true"] th:nth-child(3) { width: 20%; }
+.cameraConfigTable[data-readonly="true"] th:nth-child(4) { width: 22%; }
+.cameraConfigTable[data-readonly="true"] th:nth-child(5) { width: 16%; }
+.cameraConfigTable tbody tr { height: var(--camera-row-height); }
+.cameraConfigTable td { min-width: 0; padding: 7px 12px; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow: hidden; }
+.cameraConfigTable td:first-child > strong, .cameraConfigLocation { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; line-height: 1.35; }
+.cameraConfigTable small { display: block; margin-top: 3px; font-size: 10px; line-height: 1.2; color: var(--color-muted-2); }
+.cameraConfigTable code { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 7px; background: var(--color-surface-muted); color: #078acb; border-radius: 5px; font-size: 11px; }
+.cameraConfigStation { display: inline-block; padding: 5px 7px; background: var(--color-surface-muted); border-radius: 5px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.cameraConfigStatus { display: inline-flex; gap: 5px; align-items: center; padding: 5px 8px; border-radius: 20px; font-size: 10px; white-space: nowrap; }
+.cameraConfigStatus i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.cameraConfigStatus.live { background: #e2f8ef; color: #087b5e; }
+.cameraConfigStatus.offline { background: #fff2d9; color: #966101; }
+.cameraConfigStatus.disabled { background: #edf1f6; color: #68758a; }
+.cameraConfigActions { display: flex; gap: 5px; align-items: center; }
+.cameraConfigActions .cameraConfigIcon { width: 30px; height: 30px; }
+.cameraConfigFooter { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; border-top: 1px solid var(--color-border); padding: 8px 14px; }
+.cameraConfigFooter > div { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.cameraConfigFooter > div > span { font-size: 11px; font-weight: 600; }
+.cameraConfigFooter small { color: var(--color-muted); font-size: 10px; line-height: 1.3; }
+.cameraConfigPagination { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.cameraConfigPagination > span { min-width: 42px; text-align: center; color: var(--color-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cameraConfigEmpty { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 24px; height: calc(100% - 40px); color: var(--color-muted); }
+.cameraConfigEmpty p { margin: 0; font-size: 12px; }
+.cameraConfigBusy { color: var(--color-primary); font-size: 11px; white-space: nowrap; }
+.cameraConfigBackdrop { position: fixed; inset: 0; background: #00152d99; backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
+.cameraConfigDialog { width: min(580px, 100%); max-height: calc(100dvh - 40px); overflow: auto; background: var(--color-surface-solid); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 14px; box-shadow: 0 25px 80px #00152d55; padding: 22px; }
+.cameraConfigDialogHead, .cameraConfigPreview > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.cameraConfigDialog h3 { margin: 0; font-size: 20px; }
+.cameraConfigDialog p, .cameraConfigDialog small { color: var(--color-muted); line-height: 1.5; }
+.cameraConfigDialogHead p { margin: 4px 0 18px; font-size: 12px; }
+.cameraConfigDialog label { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; font-size: 12px; font-weight: 600; }
+.cameraConfigDialog label input:not([type=checkbox]) { min-width: 0; width: 100%; border: 1px solid var(--color-border); background: var(--color-surface-muted); color: inherit; border-radius: 7px; padding: 10px; font: inherit; font-weight: 400; }
+.cameraConfigFormRow { display: grid; grid-template-columns: 130px 1fr; gap: 14px; }
+.cameraConfigEndpoint { display: flex; gap: 8px; align-items: center; }
+.cameraConfigDialog label small { font-size: 10px; font-weight: 400; }
+.cameraConfigDialog .cameraConfigCheckbox { flex-direction: row; align-items: center; gap: 9px; }
+.cameraConfigCheckbox input { accent-color: #087bd5; width: 15px; height: 15px; }
+.cameraConfigDialogFoot { display: flex; justify-content: flex-end; gap: 10px; padding-top: 14px; border-top: 1px solid var(--color-border); margin-top: 18px; }
+.cameraConfigPreview { display: flex; flex-direction: column; width: min(1000px, 100%); max-height: calc(100dvh - 40px); padding: 18px; gap: 14px; background: var(--color-surface-solid); border: 1px solid var(--color-border); border-radius: 12px; }
+.cameraConfigPreview h3 { margin: 4px 0; font-size: 16px; }
+.cameraConfigPreview img { width: 100%; min-height: 0; flex: 1 1 auto; object-fit: contain; background: #07172b; border-radius: 8px; }
+@container workspace (max-width: 1100px) {
+  .cameraConfigTable .cameraConfigEndpointColumn { display: none; }
+  .cameraConfigTable th:nth-child(1) { width: 29%; }
+  .cameraConfigTable th:nth-child(2) { width: 10%; }
+  .cameraConfigTable th:nth-child(3) { width: 17%; }
+  .cameraConfigTable th:nth-child(5) { width: 18%; }
+  .cameraConfigTable th:nth-child(6) { width: 26%; }
+  .cameraConfigTable[data-readonly="true"] th:nth-child(1) { width: 35%; }
+  .cameraConfigTable[data-readonly="true"] th:nth-child(2) { width: 15%; }
+  .cameraConfigTable[data-readonly="true"] th:nth-child(3) { width: 25%; }
+  .cameraConfigTable[data-readonly="true"] th:nth-child(5) { width: 25%; }
+  .cameraConfigStats > p, .cameraConfigBusy { display: none; }
+  .cameraConfigPage { padding: 12px; gap: 10px; }
+  .cameraConfigPage .headerClock { display: none !important; }
+  .cameraConfigSearch input { width: 200px; }
+}
+@media (max-height: 700px) {
+  .cameraConfigPage { gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+  .cameraConfigPage .pageHeader { min-height: 56px; padding-top: 7px !important; padding-bottom: 7px !important; }
+  .cameraConfigPage .pageHeader h1 { font-size: 19px; }
+  .cameraConfigStats > div { padding: 7px 12px; }
+  .cameraConfigStats strong { font-size: 17px; }
+  .cameraConfigToolbar { min-height: 50px; padding-top: 7px; padding-bottom: 7px; }
+  .cameraConfigFooter { min-height: 48px; padding-top: 6px; padding-bottom: 6px; }
+  .cameraConfigDialog { padding: 18px; }
+  .cameraConfigDialog label { margin-bottom: 10px; }
+}
+
+/* Database-backed RTSP: readers can inspect; writers manage camera CRUD. */
+.cameraConfigSavedEndpoint { display:flex; align-items:center; gap:6px; min-width:0; }
+.cameraConfigSavedEndpoint code { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cameraConfigSavedEndpoint button { flex-shrink:0; }
+.cameraConfigDialog textarea { width:100%; min-width:0; resize:vertical; padding:10px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); color:var(--color-text); font:12px/1.6 monospace; overflow-wrap:anywhere; }
+
+.cameraConfigEndpointCompact { display:none; }
+@container workspace (max-width:1100px) { .cameraConfigEndpointCompact { display:inline-flex; padding:3px 6px; margin-top:3px; font-size:10px; } }

@@ -17,10 +17,12 @@ from typing import Dict, List, Optional, Tuple, Literal
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
+# Keep the new installation off Trangkil's GPU unless explicitly configured.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 try:
     import torch
     torch._dynamo.config.suppress_errors = True
-    torch.set_num_threads(2)
+    torch.set_num_threads(int(os.getenv("AI_TORCH_THREADS", "2")))
 except Exception:
     pass
 
@@ -38,6 +40,7 @@ from streamer import (
     DEFAULT_ROIS,
     ROIModel,
     load_all_rois,
+    invalidate_rois,
     save_roi,
     stream_manager,
 )
@@ -59,7 +62,10 @@ CONFIG_PATH = MODEL_DIR / "config.json"
 if not CONFIG_PATH.exists():
     CONFIG_PATH = ROOT / "models" / "active" / "config.json"
 
-SNAPSHOTS_DIR = Path(os.getenv("AI_SNAPSHOTS_DIR", str(AI_SERVICE_DIR / "storage" / "snapshots"))).resolve()
+SNAPSHOTS_DIR = Path(os.getenv("AI_SNAPSHOTS_DIR", str(AI_SERVICE_DIR / "storage" / "snapshots")))
+if not SNAPSHOTS_DIR.is_absolute():
+    SNAPSHOTS_DIR = ROOT / SNAPSHOTS_DIR
+SNAPSHOTS_DIR = SNAPSHOTS_DIR.resolve()
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -71,6 +77,7 @@ async def lifespan(app: FastAPI):
     run_ai_migrations()
 
     # Load active cameras 100% from database sugarcane_ai
+    AIRepository.sync_application_cameras()
     cameras = AIRepository.get_active_cameras()
     if cameras:
         for cam in cameras:
@@ -134,7 +141,7 @@ class InferRequest(BaseModel):
 
 
 class StartCycleRequest(BaseModel):
-    camera_id: int = 1
+    camera_id: int = Field(gt=0)
     cycle_code: Optional[str] = None
 
 
@@ -168,9 +175,6 @@ def load_config() -> ModelConfig:
         raise HTTPException(status_code=500, detail="models/active/config.json not found")
     return ModelConfig.model_validate_json(path.read_text(encoding="utf-8"))
 
-
-# Auto-register Default Cameras on startup
-DEFAULT_KEBONAGUNG_RTSP = os.getenv("CCTV_KEBONAGUNG_RTSP_URL", "")
 
 _session_lock = threading.Lock()
 _session_key = None
@@ -345,28 +349,18 @@ def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tupl
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     config = load_config()
-    s1 = stream_manager.get_stream(1)
-    s2 = stream_manager.get_stream(2)
-    s3 = stream_manager.get_stream(3)
-    s4 = stream_manager.get_stream(4)
     return {
         "status": "ok",
         "service": "ai-service",
+        "installation": "malang",
         "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file()},
         "model": {
             "name": config.name,
             "version": config.version,
             "available": configured_model_path(config).is_file() and (configured_model_path(config).suffix.lower() in (".keras", ".h5") or ort is not None),
         },
-        "camera_1_live": s1.is_connected if s1 else False,
-        "camera_1_fps": round(s1.fps, 1) if s1 else 0.0,
-        "camera_2_live": s2.is_connected if s2 else False,
-        "camera_2_fps": round(s2.fps, 1) if s2 else 0.0,
-        "camera_2_error": s2.last_error if s2 else None,
-        "camera_3_live": s3.is_connected if s3 else False,
-        "camera_3_fps": round(s3.fps, 1) if s3 else 0.0,
-        "camera_4_live": s4.is_connected if s4 else False,
-        "camera_4_fps": round(s4.fps, 1) if s4 else 0.0,
+        "cameras": {str(camera_id): {"live": stream.is_connected, "fps": round(stream.fps, 1)}
+                    for camera_id, stream in list(stream_manager.streams.items())},
     }
 
 
@@ -452,6 +446,7 @@ def update_roi(camera_id: int, payload: ROIModel):
 @app.post("/cameras/register")
 def register_camera(payload: CameraRegisterPayload):
     AIRepository.register_camera(payload.camera_id, payload.rtsp_url, payload.camera_name)
+    invalidate_rois()
     stream = stream_manager.get_or_create(payload.camera_id, payload.rtsp_url, payload.camera_name)
     return {
         "status": "ok",
@@ -466,6 +461,7 @@ def deactivate_camera(camera_id: int):
     with controller.lock:
         controller.set_enabled(False)
         AIRepository.deactivate_camera(camera_id)
+        invalidate_rois()
         stream = stream_manager.streams.pop(camera_id, None)
         if stream:
             stream.stop()
@@ -491,7 +487,7 @@ def load_frame_config() -> ModelConfig:
 
 def _authorized_cameras(authorization: Optional[str], permission: Optional[str] = None, operator_only: bool = False):
     """Reuse the API's session and factory access checks; never trust UI permissions."""
-    base = os.getenv("AUTO_CYCLE_API_URL", f"http://127.0.0.1:{os.getenv('API_PORT', os.getenv('BACKEND_PORT', '4110'))}").rstrip("/")
+    base = os.getenv("AUTO_CYCLE_API_URL", f"http://127.0.0.1:{os.getenv('API_PORT', os.getenv('BACKEND_PORT', '4111'))}").rstrip("/")
     try:
         def read(path):
             request = Request(base + path, headers={"Authorization": authorization or ""})
@@ -819,7 +815,7 @@ def infer(payload: InferRequest):
 
     # Save to sugarcane_ai database
     result_id = AIRepository.save_inference_result(
-        camera_id=payload.camera_id or 1,
+        camera_id=payload.camera_id or 0,
         model_version=config.version,
         snapshot_path=rel_snapshot_path,
         classes_score=mapped_scores,

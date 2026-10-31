@@ -1,23 +1,23 @@
+# Optional dedicated PostgreSQL. Existing shared server on 5433 is used by .env.
+# To use this container, point both Malang DB URLs to 5434 before db:setup.
+name: sugarcane-malang
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: sugarcane-postgres
+    container_name: sugarcane-malang-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: sugarcane
-      POSTGRES_USER: sugarcane
-      POSTGRES_PASSWORD: sugarcane
+      POSTGRES_DB: postgres
+      POSTGRES_USER: sugarcane_malang_owner
+      POSTGRES_PASSWORD: ${MALANG_POSTGRES_PASSWORD:?Set MALANG_POSTGRES_PASSWORD before starting the optional container}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
-      - sugarcane_postgres:/var/lib/postgresql/data
-      - ./database/postgres:/docker-entrypoint-initdb.d:ro
+      - sugarcane_malang_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sugarcane -d sugarcane"]
+      test: ["CMD-SHELL", "pg_isready -U sugarcane_malang_owner -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 10
-
 volumes:
-  sugarcane_postgres:
-
+  sugarcane_malang_postgres:

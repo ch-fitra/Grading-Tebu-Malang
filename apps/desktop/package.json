@@ -17,8 +17,8 @@
     "typescript": "^5.7.2"
   },
   "build": {
-    "appId": "id.xoora.tebuai",
-    "productName": "TebuAI",
+    "appId": "id.xoora.tebuai.malang",
+    "productName": "TebuAI Malang",
     "files": [
       "dist/**/*"
     ],

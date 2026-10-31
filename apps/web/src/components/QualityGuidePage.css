@@ -1,0 +1,72 @@
+.qualityLegend { display: flex; align-items: center; flex: 0 0 auto; gap: 18px; min-height: 30px; color: var(--color-muted); font-size: 11px; }
+.qualityLegend strong { margin-right: auto; color: var(--color-text); font-size: 13px; }
+.qualityLegend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.qualityLegend i { width: 7px; height: 7px; border-radius: 50%; background: #059669; }
+.qualityLegend .deduction { background: #ea580c; }.qualityLegend .manual { background: #9333ea; }.qualityLegend .reject { background: #dc2626; }
+.qualityCards { display: grid; flex: 1 1 0; gap: 10px; min-width: 0; min-height: 0; overflow: hidden; }
+.qualityCard { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border: 1px solid var(--color-border); border-top: 3px solid; border-radius: 10px; background: var(--color-surface); box-shadow: 0 3px 12px #0f172a05; }
+.qualityDetailTrigger { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; }
+.qualityDetailTrigger:hover { box-shadow: inset 0 0 0 2px var(--color-border-strong); }
+.qualityWorkspace .qualityDetailTrigger:focus-visible { outline-offset: -3px; }
+.qualityOpenIcon { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface-solid); color: var(--color-muted); }
+.qualityPhoto { position: relative; flex: 1 1 36%; min-height: 90px; overflow: hidden; background: #0f172a; }
+.qualityPhoto > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.qualityGradeBadge { position: absolute; top: 10px; left: 10px; border: 1px solid #ffffff33; border-radius: 7px; padding: 5px 10px; color: #fff; font-weight: 800; font-size: 12px; }
+.qualityPhotoCaption { position: absolute; bottom: 8px; left: 10px; border-radius: 4px; padding: 3px 6px; background: #0f172ab3; color: #fff; font-size: 9px; }
+.qualityBody { display: flex; flex-direction: column; flex: 0 0 auto; min-width: 0; gap: 7px; padding: 12px; }
+.qualityCardTitle { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.qualityCardTitle h2 { margin: 0; font-size: 16px; line-height: 1.3; }
+.qualityCardTitle > span { font-size: 10px; font-weight: 700; text-align: right; }
+.qualityName, .qualityCriteria { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-muted); }
+.qualityMetrics > div { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-soft); }
+.qualityMetrics span { color: var(--color-muted); font-size: 9px; }
+.qualityMetrics strong { font-size: 11px; }
+.qualityDecision { display: flex; align-items: flex-start; gap: 6px; border-radius: 7px; padding: 7px; font-size: 10px; line-height: 1.4; font-weight: 700; }
+.qualityDecision svg { flex-shrink: 0; margin-top: 1px; }
+.qualityWorkspace .qualityFooter { min-height: 36px; padding: 0; border: 0; }
+.qualityDetailHint { flex-shrink: 0; font-size: 10px; }
+.qualityWorkspace[data-compact="true"] .qualityCard { flex-direction: row; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityPhoto { flex: 0 0 26%; min-height: 0; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityGradeBadge { top: 7px; left: 6px; padding: 4px 5px; font-size: 10px; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityPhotoCaption { display: none; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityBody { flex: 1; min-height: 0; justify-content: center; gap: 5px; padding: 9px; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityCardTitle { padding-right: 22px; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityCardTitle h2 { font-size: 14px; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityCardTitle > span { display: none; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityName { font-size: 10px; line-height: 1.35; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityMetrics > div { flex-direction: row; align-items: center; justify-content: space-between; gap: 5px; padding: 5px 6px; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityCriteria { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 10px; line-height: 1.4; }
+.qualityWorkspace[data-compact="true"] .qualityCard .qualityDecision { padding: 5px; font-size: 9px; line-height: 1.3; }
+.qualityWorkspace[data-dense="true"] .qualityCard .qualityPhoto { flex-basis: 22%; }
+.qualityWorkspace[data-dense="true"] .qualityCard .qualityCriteria, .qualityWorkspace[data-dense="true"] .qualityCard .qualityDecision { display: none; }
+.qualityWorkspace[data-dense="true"] .qualityCard .qualityBody { padding: 7px 9px; gap: 4px; }
+.qualityWorkspace[data-dense="true"] .qualityCard .qualityMetrics > div { padding: 4px 5px; }
+.qualityDetailDialog { display: flex; flex-direction: column; gap: 14px; }
+.qualityDetailDialog .workspaceDialogHead { margin: 0; }
+.qualityDetailPhoto { width: 100%; height: clamp(120px, 26vh, 240px); flex-shrink: 0; border-radius: 9px; object-fit: cover; }
+.qualityDetailDialog .qualityCriteria { font-size: 12px; }
+.qualityDetailDialog .qualityDecision { font-size: 12px; }
+@container workspace (max-width: 1100px) {
+  .qualityLegend { gap: 12px; }
+  .qualityLegend strong { font-size: 12px; }
+}
+@container workspace (max-width: 700px) {
+  .qualityWorkspace .pageHeader { flex-direction: row !important; align-items: center !important; gap: 10px; }
+  .qualityWorkspace .pageHeader h1 { font-size: 19px; }
+  .qualityWorkspace .headerUtilityGroup { flex-wrap: nowrap; gap: 7px !important; }
+  .qualityWorkspace .headerBrandGroup { min-width: 0; }
+  .qualityLegend { gap: 10px; min-height: 24px; }
+  .qualityLegend strong { display: none; }
+  .qualityLegend > span { font-size: 10px; }
+  .qualityWorkspace .qualityFooter { min-height: 26px; font-size: 9px; }
+  .qualityDetailHint { display: none; }
+}
+@container workspace (max-width: 500px) {
+  .qualityWorkspace .systemHealthBadge span { display: none; }
+  .qualityWorkspace .systemHealthBadge { padding: 7px !important; }
+  .qualityWorkspace .workspacePill { padding: 6px; font-size: 10px; }
+  .qualityWorkspace[data-compact="true"] .qualityCard .qualityPhoto { flex-basis: 22%; }
+  .qualityWorkspace[data-compact="true"] .qualityCard .qualityGradeBadge { display: none; }
+  .qualityWorkspace[data-compact="true"] .qualityCard .qualityName { font-size: 9px; }
+  .qualityWorkspace[data-compact="true"] .qualityCard .qualityMetrics > div { flex-wrap: wrap; }
+}

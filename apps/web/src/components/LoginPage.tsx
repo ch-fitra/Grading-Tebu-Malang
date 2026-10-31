@@ -29,13 +29,13 @@ export function LoginPage() {
       <div className="loginLeftPanel">
         <div className="loginLogoSection">
           <img className="loginMainLogo" src={`${import.meta.env.BASE_URL}vale-amaze-mekaar-logo.png`} alt="Vale Amaze Mekaar" />
-          <span className="loginStatusBadge">Local AI Platform</span>
+          <span className="loginStatusBadge">PG Kebon Agung - Malang</span>
         </div>
         
         <div className="loginBrandMessage">
           <h2>AI Sugar Cane Grading System</h2>
           <p>
-            Computer Vision Platform for Industrial Sugar Cane Quality Monitoring
+            Pemantauan mutu tebu PG Kebon Agung, Malang, Jawa Timur
           </p>
         </div>
         
@@ -67,7 +67,7 @@ export function LoginPage() {
           <div className="loginHeading mobileOnly">
             <img className="loginLogoMobile" src={`${import.meta.env.BASE_URL}vale-amaze-mekaar-logo.png`} alt="Vale Amaze Mekaar" />
             <h2>AI Sugar Cane Grading</h2>
-            <span className="loginStatusBadge">Local AI Platform</span>
+            <span className="loginStatusBadge">PG Kebon Agung - Malang</span>
           </div>
 
           <div className="loginFormInputs">

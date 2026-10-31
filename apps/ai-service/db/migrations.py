@@ -125,16 +125,6 @@ def run_ai_migrations():
                 ADD COLUMN IF NOT EXISTS cycle_code VARCHAR(50);
             """)
 
-            # IDs must match the API defaults: 1 = Kebon Agung, 2 = Trangkil.
-            cursor.execute("""
-                INSERT INTO ai_cameras (id, camera_code, name, rtsp_url, location, roi_config)
-                VALUES 
-                (1, 'CAM_KEBONAGUNG_1', 'MBS 1 - PT Kebon Agung (Malang)', %s, 'PG Kebon Agung (Malang)', NULL),
-                (2, 'CAM_TRANGKIL_5', 'MBS 5 - PT Trangkil (Wisenet Meja 5)', %s, 'PG Trangkil (Pati)', '{"camera_id": 2, "enabled": true, "x": 0.14, "y": 0.14, "width": 0.74, "height": 0.66, "label": "ROI: MEJA TEBU 5 (PT TRANGKIL WISENET)", "show_grid": true, "show_telemetry": true, "show_scrim": true}'::jsonb)
-                ON CONFLICT DO NOTHING;
-            """, (os.getenv("CCTV_KEBONAGUNG_RTSP_URL", ""), os.getenv("CCTV_TRANGKIL_RTSP_URL", "")))
-            cursor.execute("SELECT setval(pg_get_serial_sequence('ai_cameras','id'), GREATEST(COALESCE((SELECT MAX(id) FROM ai_cameras),1), (SELECT last_value FROM ai_cameras_id_seq)))")
-
             # Seed Default AI Model if empty (Keras model uploaded by user)
             cursor.execute("""
                 INSERT INTO ai_models (model_code, model_name, version, model_path, is_active, config_json)

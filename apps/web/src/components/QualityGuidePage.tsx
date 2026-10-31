@@ -1,59 +1,53 @@
-import { ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
+import { Maximize2, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { usePanelSize } from "../hooks/usePanelSize";
-import { TRANGKIL_GRADES } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, type KebonAgungGradeItem } from "../utils/grade-guide";
+import { Header } from "./shared/Header";
+import "./QualityGuidePage.css";
 
 export function QualityGuidePage() {
-  const size = usePanelSize<HTMLElement>();
-  const [page, setPage] = useState(0);
-  const pageSize = size.width < 600 ? (size.height < 640 ? 1 : 2) : size.height < 480 ? 2 : size.width < 1000 ? (size.height < 640 ? 2 : 4) : size.height < 720 ? 4 : 8;
-  const columns = pageSize === 8 ? 4 : pageSize === 4 ? (size.width >= 1000 && size.height < 720 ? 4 : 2) : pageSize === 2 && size.width >= 600 ? 2 : 1;
-  const pages = Math.ceil(TRANGKIL_GRADES.length / pageSize);
-  const current = Math.min(page, pages - 1);
-  const grades = TRANGKIL_GRADES.slice(current * pageSize, (current + 1) * pageSize);
+  const size = usePanelSize<HTMLDivElement>();
+  const [selected, setSelected] = useState<KebonAgungGradeItem | null>(null);
+  const columns = size.width >= 1000 ? 4 : 2;
+  const rows = Math.ceil(KEBONAGUNG_GRADES.length / columns);
+  const cardHeight = (size.height - (rows - 1) * 10) / rows;
+  const compact = cardHeight < 300 || size.width / columns < 260;
+  const dense = cardHeight < 170;
   return (
-    <section ref={size.ref} className="qualityGuidePage" data-count={pageSize}>
-      <header className="qualityGuideHeader">
-        <div>
-          <span className="qualityGuideEyebrow">REFERENSI MUTU TEBU</span>
-          <h1>Standar Toleransi Mutu & Panduan Kelas Label AI</h1>
-          <p>Kenali setiap kelas MBS, batas toleransi, dan keputusan pabrik.</p>
-        </div>
-        <span className="qualityGuideClassCount">8 kelas MBS</span>
-      </header>
-      <div className="qualityGuideContent">
-      <div className="qualityGuideGrid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${Math.ceil(pageSize / columns)}, minmax(0, 1fr))` }}>
-        {grades.map(item => (
-          <article key={item.code} className="qualityGuideCard" style={{ borderTopColor: item.color }}>
-            <div className="qualityGuidePhoto">
+    <section className="qualityWorkspace fixedWorkspace" data-compact={compact} data-dense={dense}>
+      <Header title="Panduan Mutu" subtitle={size.width < 620 ? "PG Kebon Agung · Malang" : "PT Kebon Agung · Unit PG Kebon Agung, Malang"} action={<span className="workspacePill" title="Referensi klasifikasi; rafaksi dan keputusan giling perlu validasi QC Malang"><ShieldCheck size={15} />Referensi - validasi QC</span>} />
+      <div className="qualityLegend"><strong>Standar mutu tebu</strong><span><i className="free" />Lolos giling</span><span><i className="deduction" />Rafaksi</span><span><i className="manual" />Keputusan QC</span><span><i className="reject" />Ditolak</span></div>
+      <div ref={size.ref} className="qualityCards" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}>
+        {KEBONAGUNG_GRADES.map(item => (
+          <article key={item.code} className="qualityCard" style={{ borderTopColor: item.color }}>
+            <button className="qualityDetailTrigger" aria-label={`Lihat detail ${item.label}`} onClick={() => setSelected(item)}><span className="qualityOpenIcon"><Maximize2 size={12} /></span></button>
+            <div className="qualityPhoto">
               <img src={item.img} alt={`Contoh Visual ${item.label} (${item.name})`} />
-              <span className={`mbsGradeBadge ${item.badgeCls}`}>{item.label}</span>
-              <span className="qualityGuidePhotoCaption">Contoh material tebu</span>
+              <span className="qualityGradeBadge" style={{ background: item.grad }}>{item.label}</span>
+              <span className="qualityPhotoCaption">Contoh material tebu</span>
             </div>
-            <div className="qualityGuideBody">
-              <div className="qualityGuideCardTitle"><h2>{item.label}</h2><span style={{ color: item.color }}>{item.status}</span></div>
-              <p className="qualityGuideDescription">{item.name}</p>
-              <div className="qualityGuideMetrics">
-                <div><span>Toleransi kotoran</span><strong>{item.tol}</strong></div>
+            <div className="qualityBody">
+              <div className="qualityCardTitle"><h2>{item.label}</h2><span style={{ color: item.color }}>{item.status}</span></div>
+              <p className="qualityName">{item.name}</p>
+              <div className="qualityMetrics">
                 <div><span>Rafaksi</span><strong style={{ color: item.color }}>{item.rafaksi}</strong></div>
               </div>
-              <dl className="qualityGuideCriteria">
-                {item.variasi.map(line => <div key={line.label}><dt>{line.label}</dt><dd>{line.value}</dd></div>)}
-              </dl>
-              <div className="qualityGuideDecision" style={{ color: item.color, background: `${item.color}12` }}><ShieldCheck size={14} /><span>{item.decision}</span></div>
+              <p className="qualityCriteria">{item.kriteria}</p>
+              <div className="qualityDecision" style={{ color: item.color, background: `${item.color}12` }}><ShieldCheck size={14} /><span>{item.decision}</span></div>
             </div>
           </article>
         ))}
       </div>
-      <footer className="qualityGuideFooter">
+      <footer className="workspaceFooter qualityFooter">
         <span>Kelas T: keputusan giling dan rafaksi menunggu peninjauan QC secara manual.</span>
-        <div className="qualityGuidePagination">
-          <button aria-label="Kelas sebelumnya" disabled={current === 0} onClick={() => setPage(current - 1)}><ChevronLeft size={16} /></button>
-          <span>{current + 1} / {pages}</span>
-          <button aria-label="Kelas berikutnya" disabled={current === pages - 1} onClick={() => setPage(current + 1)}><ChevronRight size={16} /></button>
-        </div>
+        <span className="qualityDetailHint">Pilih kelas untuk melihat detail.</span>
       </footer>
-      </div>
+      {selected && <div className="workspaceOverlay" onKeyDown={event => { if (event.key === "Escape") setSelected(null); }}><div className="workspaceDialog qualityDetailDialog" role="dialog" aria-modal="true" aria-labelledby="quality-detail-title">
+        <div className="workspaceDialogHead"><div><h2 id="quality-detail-title">{selected.label} · {selected.name}</h2><p>{selected.status}</p></div><button autoFocus className="workspaceIcon" aria-label="Tutup detail kelas" onClick={() => setSelected(null)}><X size={18} /></button></div>
+        <img className="qualityDetailPhoto" src={selected.img} alt={`Contoh visual ${selected.label}`} />
+        <div className="qualityMetrics"><div><span>Rafaksi</span><strong style={{ color: selected.color }}>{selected.rafaksi}</strong></div></div>
+        <p className="qualityCriteria">{selected.kriteria}</p><div className="qualityDecision" style={{ color: selected.color, background: `${selected.color}12` }}><ShieldCheck size={15} /><span>{selected.decision}</span></div>
+      </div></div>}
     </section>
   );
 }

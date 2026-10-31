@@ -48,10 +48,9 @@ class CamerasView extends StatelessWidget {
                   subtitle: Text(s(camera['location'])),
                   trailing: Chip(label: Text(s(camera['status']))),
                 ),
-                Text(
-                  'RTSP: ${s(camera['rtspUrl'])}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                ExpansionTile(
+                  title: const Text('Lihat link RTSP tersimpan'),
+                  children: [SelectableText(s(camera['rtspUrl']))],
                 ),
                 if (state.can('camera.write'))
                   Row(
@@ -92,6 +91,7 @@ Future<void> cameraDialog(
   final name = TextEditingController(text: s(camera?['name'], ''));
   final rtsp = TextEditingController(text: s(camera?['rtspUrl'], ''));
   final location = TextEditingController(text: s(camera?['location'], ''));
+  final station = TextEditingController(text: s(camera?['station'], '2'));
   await showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
@@ -113,6 +113,12 @@ Future<void> cameraDialog(
               ),
               const SizedBox(height: 10),
               TextField(
+                controller: station,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Nomor meja MBS (1-99)'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
                 controller: location,
                 decoration: const InputDecoration(labelText: 'Lokasi'),
               ),
@@ -131,6 +137,11 @@ Future<void> cameraDialog(
               snack(dialogContext, 'Nama dan URL RTSP wajib diisi');
               return;
             }
+            final stationNumber = int.tryParse(station.text.trim());
+            if (stationNumber == null || stationNumber < 1 || stationNumber > 99) {
+              snack(dialogContext, 'Nomor meja MBS harus 1 sampai 99');
+              return;
+            }
             await runMutation(
               dialogContext,
               () => state.mutate(
@@ -142,6 +153,8 @@ Future<void> cameraDialog(
                   'name': name.text.trim(),
                   'rtspUrl': rtsp.text.trim(),
                   'location': location.text.trim(),
+                  'station': stationNumber,
+                  'enabled': camera?['enabled'] != false,
                 },
               ),
             );
@@ -154,4 +167,5 @@ Future<void> cameraDialog(
   name.dispose();
   rtsp.dispose();
   location.dispose();
+  station.dispose();
 }

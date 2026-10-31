@@ -1,6 +1,6 @@
-const configuredBackend = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_BACKEND_URL;
+const configuredBackend = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_BACKEND_URL ?? "same-origin";
 const useDevProxy = import.meta.env.DEV && ["localhost", "127.0.0.1"].includes(window.location.hostname);
-export const backendUrl = window.sugarcaneDesktop?.apiBaseUrl ?? (useDevProxy || configuredBackend === "same-origin" ? "" : configuredBackend ?? "http://127.0.0.1:4110");
+export const backendUrl = window.sugarcaneDesktop?.apiBaseUrl ?? (useDevProxy || configuredBackend === "same-origin" ? "" : configuredBackend);
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }
@@ -16,7 +16,7 @@ export function getCameraStreamUrl(cameraId: number, overlay: boolean = true, qu
 
 export const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   let token = "";
-  try { token = JSON.parse(window.localStorage.getItem("tebu-session") ?? "null")?.token ?? ""; } catch { /* invalid cached session */ }
+  try { token = JSON.parse(window.localStorage.getItem("tebu-malang-session") ?? "null")?.token ?? ""; } catch { /* invalid cached session */ }
   const headers = new Headers(init?.headers);
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);

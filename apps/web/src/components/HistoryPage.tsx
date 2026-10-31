@@ -31,7 +31,7 @@ import { TruckInspectionDetailModal } from "./TruckInspectionDetailModal";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
-import { TRANGKIL_GRADES, normalizeGrade } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, normalizeGrade } from "../utils/grade-guide";
 import { aiApi, backendUrl } from "../utils/api";
 import type { TruckInspectionSession, InferenceResult } from "../types";
 
@@ -40,7 +40,6 @@ import { resolveMbsStation } from "../utils/stations";
 type HistorySummary = {
   total_captures: number;
   average_confidence: number | null;
-  average_impurity: number | null;
 };
 
 export function HistoryPage() {
@@ -125,25 +124,14 @@ export function HistoryPage() {
     const next = theme === "light" ? "dark" : "light";
     setTheme(next);
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("tebu-ui-theme", next);
+    localStorage.setItem("tebu-malang-ui-theme", next);
   };
 
-  const userFactory = (() => {
-    const u = (session?.user.username || "").toLowerCase();
-    if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
-    if (u.includes("trangkil")) return "trangkil";
-    return null;
-  })();
-
-  const visibleCameras = cameras.filter((c) => {
-    if (!userFactory) return true;
-    const text = `${c.name} ${c.location}`.toLowerCase();
-    return userFactory === "kebonagung" ? (text.includes("kebon agung") || text.includes("malang")) : text.includes("trangkil");
-  });
+  const visibleCameras = cameras;
   const availableLines = new Set(visibleCameras.map(camera => resolveMbsStation(camera.id, cameras).mbsNum));
   const allowedCameraIds = new Set(visibleCameras.map(c => c.id));
-  const visibleHistory = history.filter(h => !userFactory || allowedCameraIds.has(h.cameraId));
-  const visibleTrucks = truckSessions.filter(t => !userFactory || allowedCameraIds.has(t.line));
+  const visibleHistory = history.filter(h => allowedCameraIds.has(h.cameraId));
+  const visibleTrucks = truckSessions.filter(t => allowedCameraIds.has(t.line));
   const summaryCameraScope = visibleCameras
     .filter(camera => selectedLineFilter === "all" || resolveMbsStation(camera.id, cameras).mbsNum === selectedLineFilter)
     .map(camera => camera.id).sort((a, b) => a - b).join(",");
@@ -285,10 +273,6 @@ export function HistoryPage() {
     ? `${Math.round(captureSummary.average_confidence * 100)}%`
     : "—";
 
-  const averageImpurity = captureSummary?.average_impurity != null
-    ? `${captureSummary.average_impurity.toFixed(1)}%`
-    : "—";
-
   const hasActiveFilters = Boolean(
     searchQuery.trim() ||
     selectedDateFilter !== "all" ||
@@ -316,7 +300,6 @@ export function HistoryPage() {
       "Meja Tebu (MBS)",
       "Predicted Grade",
       "Karakteristik & Simbol",
-      "Ambang Toleransi",
       "Kebijakan Rafaksi",
       "Status Giling",
       "Akurasi AI (%)"
@@ -324,13 +307,12 @@ export function HistoryPage() {
     const body = filteredHistory.map((row) => {
       const station = resolveMbsStation(row.cameraId, cameras);
       const capGrade = normalizeGrade(row.grade);
-      const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
+      const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
       return [
         new Date(row.timestamp).toLocaleString("id-ID"),
         `${station.label} (${station.subLabel})`,
         `MBS ${capGrade}`,
         curConfig.name,
-        curConfig.tol,
         curConfig.rafaksi,
         curConfig.status,
         Math.round((row.confidence ?? 0) * 100)
@@ -349,7 +331,6 @@ export function HistoryPage() {
       "Waktu Mulai",
       "Waktu Selesai",
       "Total Frame",
-      "Rata-rata Kotoran (%)",
       "Predicted Grade AI",
       "Rata-rata Akurasi (%)",
       "Keputusan Pabrik",
@@ -367,10 +348,9 @@ export function HistoryPage() {
         new Date(row.startedAt).toLocaleString("id-ID"),
         row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
         row.totalCaptures,
-        row.impurityMeasured ? `${row.averageImpurity.toFixed(2)}%` : "Tidak diukur",
         `MBS ${cycleGrade(row)}`,
         `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
-        TRANGKIL_GRADES.find(g => g.code === cycleGrade(row))?.decision ?? "Belum ditetapkan",
+        KEBONAGUNG_GRADES.find(g => g.code === cycleGrade(row))?.decision ?? "Belum ditetapkan",
         row.status,
         row.notes || "-"
       ];
@@ -385,13 +365,13 @@ export function HistoryPage() {
       {/* ─── Top Station Header (Matches Dashboard Cockpit) ─── */}
       <div className="stationHeader">
         <div className="stationHeaderLeft">
-          <div className="stationLogoBadge" title={userFactory === "kebonagung" ? "PG Kebon Agung (Malang)" : userFactory === "trangkil" ? "PG Trangkil (Pati)" : "Semua Pabrik"}>
-            {userFactory !== "kebonagung" && <img
-              src={`${import.meta.env.BASE_URL}logo-trangkil.png`}
-              alt="Pabrik Gula Trangkil"
-              className="stationTrangkilLogo"
-            />}
-            <span className="stationFactoryCity">{userFactory === "kebonagung" ? "PG Kebon Agung, Malang" : userFactory === "trangkil" ? "Pati, Jawa Tengah" : "Riwayat Semua Pabrik"}</span>
+          <div className="stationLogoBadge" title="PG Kebon Agung (Malang)">
+            <img
+              src={`${import.meta.env.BASE_URL}logo-pg-kebonagung.svg`}
+              alt="Pabrik Gula Kebon Agung"
+              className="stationKebonAgungLogo"
+            />
+            <span className="stationFactoryCity">Malang, Jawa Timur</span>
           </div>
 
           <div className="historyTitleBadge">
@@ -403,9 +383,9 @@ export function HistoryPage() {
           <div className="stationMbsTabs">
             <button
               type="button"
-              className="stationMbsTab locked"
-              disabled
-              title="Semua Meja — Jalur Terkunci (Hanya MBS 5 yang aktif di PG Trangkil)"
+              className={`stationMbsTab ${selectedLineFilter === "all" ? "active" : ""}`}
+              onClick={() => setSelectedLineFilter("all")}
+              title="Tampilkan seluruh meja terdaftar"
             >
               <Layers size={10} />
               <span>Semua Meja</span>
@@ -420,7 +400,7 @@ export function HistoryPage() {
                   className={`stationMbsTab ${isSelected ? "active" : ""} ${isLocked ? "locked" : ""}`}
                   onClick={() => { if (!isLocked) setSelectedLineFilter(lineNum); }}
                   disabled={isLocked}
-                  title={isLocked ? `MBS ${lineNum} — Jalur Terkunci` : `MBS 5 (Wisenet) — Kamera Aktif Online`}
+                  title={isLocked ? `MBS ${lineNum} — Jalur Terkunci` : `MBS ${lineNum} — Kamera Terdaftar`}
                 >
                   {isLocked && <Lock size={10} />}
                   <span>MBS {lineNum}</span>
@@ -516,7 +496,7 @@ export function HistoryPage() {
                 type="button"
                 className="historySyncBtn"
                 onClick={() => setIsSyncModalOpen(true)}
-                title="Unggah langsung file Excel asli PT Trangkil dan cocokkan secara otomatis dengan siklus inspeksi Meja Tebu"
+                title="Unggah langsung file Excel asli PG Kebon Agung dan cocokkan secara otomatis dengan siklus inspeksi Meja Tebu"
               >
                 <FileSpreadsheet size={13} />
                 <span>Upload Excel Pabrik</span>
@@ -535,7 +515,7 @@ export function HistoryPage() {
           </div>
         </div>
 
-        {/* ─── Cockpit KPI Summary Cards (Balanced 4-Column Grid) ─── */}
+        {/* ─── Cockpit KPI Summary Cards (Balanced 3-Column Grid) ─── */}
         <div className="historyKpiGrid">
           <div className="historyKpiCard">
             <span className="historyKpiLabel">TOTAL SIKLUS PEMINDAIAN</span>
@@ -566,16 +546,6 @@ export function HistoryPage() {
             </strong>
             <span className="historyKpiSub">
               {status?.ai.model?.available ? "Model ONNX Aktif" : "Model ONNX Belum Tersedia"}
-            </span>
-          </div>
-
-          <div className="historyKpiCard">
-            <span className="historyKpiLabel">RATA-RATA KOTORAN (IMPURITY)</span>
-            <strong className="historyKpiValue amber">
-              {averageImpurity}
-            </strong>
-            <span className="historyKpiSub">
-              Toleransi standar pabrik PG Trangkil
             </span>
           </div>
         </div>
@@ -667,7 +637,7 @@ export function HistoryPage() {
               </div>
             </div>
 
-            {/* 3. MBS Station Field (Hanya MBS 5 Aktif, Lainnya Terkunci) */}
+            {/* 3. MBS Station Field (Meja mengikuti konfigurasi kamera) */}
             <div className={`cockpitField ${selectedLineFilter !== "all" ? "hasValue" : ""}`}>
               <label className="cockpitFieldLabel">
                 <Building2 size={10} />
@@ -881,7 +851,7 @@ export function HistoryPage() {
                             </span>
                           </td>
                           <td>
-                            {<span className={`decision-badge ${["G", "X"].includes(gradeCode) ? "reject" : ["D", "B"].includes(gradeCode) ? "non-mbs" : gradeCode === "T" ? "pending" : "mbs"}`}>{TRANGKIL_GRADES.find(g => g.code === gradeCode)?.decision ?? "Belum ditetapkan"}</span>}
+                            {<span className={`decision-badge ${["G", "X"].includes(gradeCode) ? "reject" : ["D", "B"].includes(gradeCode) ? "non-mbs" : gradeCode === "T" ? "pending" : "mbs"}`}>{KEBONAGUNG_GRADES.find(g => g.code === gradeCode)?.decision ?? "Belum ditetapkan"}</span>}
                           </td>
                           <td>
                             <span className={`sessionStatusPill ${row.status}`}>
@@ -909,7 +879,7 @@ export function HistoryPage() {
                                         targetType: "truck_inspection",
                                         targetId: row.id,
                                         title: `Siklus ${row.truckCode || row.id}`,
-                                        subtitle: `MBS ${row.line === 2 ? 5 : row.line} • ${row.totalCaptures} Frame Terekam`
+                                        subtitle: `MBS ${resolveMbsStation(row.line, cameras).mbsNum} • ${row.totalCaptures} Frame Terekam`
                                       });
                                     } else {
                                       if (confirm(`Apakah Anda yakin ingin menghapus data siklus ${row.truckCode} secara langsung sebagai Direksi?`)) {
@@ -957,7 +927,6 @@ export function HistoryPage() {
                       <th>Kamera MBS</th>
                       <th>Grade Mutu</th>
                       <th>Karakteristik Mutu</th>
-                      <th>Ambang Toleransi</th>
                       <th>Kebijakan Rafaksi</th>
                       <th>Status Giling</th>
                       <th>Akurasi AI</th>
@@ -967,7 +936,7 @@ export function HistoryPage() {
                   <tbody>
                     {pagedCaptures.map((row) => {
                       const g = normalizeGrade(row.grade);
-                      const curConfig = TRANGKIL_GRADES.find(item => item.code === g) || TRANGKIL_GRADES[1];
+                      const curConfig = KEBONAGUNG_GRADES.find(item => item.code === g) || KEBONAGUNG_GRADES[1];
                       const confPct = Math.round((row.confidence ?? 0) * 100);
 
                       return (
@@ -1015,11 +984,6 @@ export function HistoryPage() {
                           <td>
                             <span style={{ fontWeight: 650, color: "var(--color-text)", fontSize: "12px" }}>
                               {curConfig.name}
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ fontWeight: 600, color: "var(--color-muted)", fontSize: "12px" }}>
-                              {curConfig.tol}
                             </span>
                           </td>
                           <td>
@@ -1092,7 +1056,7 @@ export function HistoryPage() {
       {/* ─── Single Capture Modal Preview ─── */}
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
-        const curConfig = TRANGKIL_GRADES.find(g => g.code === capGrade) || TRANGKIL_GRADES[1];
+        const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
         const confPct = Math.round((selectedCapture.confidence ?? 0) * 100);
         const station = resolveMbsStation(selectedCapture.cameraId, cameras);
         const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", {
@@ -1126,7 +1090,7 @@ export function HistoryPage() {
                     <h2 id="capture-modal-title">Detail Tangkapan Citra AI</h2>
                     <span className="modal-batch-pill">Frame {frameNumber(selectedCapture.id)}</span>
                   </div>
-                  <p>Hasil pemindaian citra frame meja tebu (PG Trangkil) • Anotasi Klasifikasi Mutu Meja Tebu</p>
+                  <p>Hasil pemindaian citra frame meja tebu (PG Kebon Agung) • Anotasi Klasifikasi Mutu Meja Tebu</p>
                 </div>
                 <button
                   type="button"
@@ -1212,11 +1176,6 @@ export function HistoryPage() {
                     </div>
                     <div className="decision-metrics-row">
                       <div className="decision-metric">
-                        <span>Toleransi Mutu:</span>
-                        <strong>{curConfig.tol}</strong>
-                      </div>
-                      <div className="decision-metric-divider" />
-                      <div className="decision-metric">
                         <span>Kebijakan Rafaksi:</span>
                         <strong style={{ color: curConfig.color }}>{curConfig.rafaksi}</strong>
                       </div>
@@ -1257,11 +1216,11 @@ export function HistoryPage() {
                         <Layers size={13} />
                         <strong>DISTRIBUSI PROBABILITAS KELAS MUTU (AI)</strong>
                       </div>
-                      <span className="dist-card-sub">Standar 7 Kelas Mutu PG Trangkil</span>
+                      <span className="dist-card-sub">Referensi kelas mutu - validasi QC Malang</span>
                     </div>
 
                     <div className="dist-compact-list">
-                      {TRANGKIL_GRADES.map((item, idx) => {
+                      {KEBONAGUNG_GRADES.map((item, idx) => {
                         const isMatch = item.code === capGrade;
                         const prob = isMatch ? confPct : Math.max(1, Math.round((100 - confPct) / 6));
                         return (

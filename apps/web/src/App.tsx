@@ -1,4 +1,4 @@
-import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen } from "lucide-react";
+import { Gauge, History, LogOut, Users, Crown, Activity, Shield, BookOpen, Camera } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "./store";
 import { LoginPage } from "./components/LoginPage";
@@ -6,8 +6,9 @@ import { DashboardPage } from "./components/DashboardPage";
 import { QualityGuidePage } from "./components/QualityGuidePage";
 import { HistoryPage } from "./components/HistoryPage";
 import { PoweredByWatermark } from "./components/shared/PoweredByWatermark";
+import { CameraConfigurationPage } from "./components/CameraConfigurationPage";
 import { AccessManagement } from "./components/AccessManagement";
-const trangkilLogoSvg = "./logo-pg-trangkil.svg";
+const kebonagungLogoSvg = "./logo-pg-kebonagung.svg";
 
 const configuredWebsocket = import.meta.env.VITE_WS_URL;
 const websocketUrl = window.sugarcaneDesktop?.websocketUrl ?? (configuredWebsocket && configuredWebsocket !== "same-origin" ? configuredWebsocket : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`);
@@ -16,6 +17,7 @@ const tabs = [
   { id: "dashboard", label: "Dashboard", icon: Gauge },
   { id: "history", label: "History", icon: History },
   { id: "guide", label: "Panduan Mutu", icon: BookOpen },
+  { id: "cameras", label: "Konfigurasi Kamera", icon: Camera },
   { id: "access", label: "Users & Roles", icon: Users }
 ] as const;
 
@@ -68,7 +70,7 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
-    const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", access: "user.read" };
+    const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", cameras: "camera.read", access: "user.read" };
     if (!permissions.includes(required[tab])) {
       const first = tabs.find(item => permissions.includes(required[item.id]));
       if (first) setTab(first.id);
@@ -120,18 +122,7 @@ export default function App() {
   }
 
   const roleLabel = session.user.role === "admin" ? "Direksi (Admin)" : session.user.role === "operator" ? "Operator Meja" : session.user.role === "developer" ? "Developer" : session.user.role;
-  const userFactory = (() => {
-    const u = (session?.user.username || "").toLowerCase();
-    if (u.includes("kebonagung") || u.includes("malang")) return "kebonagung";
-    if (u.includes("trangkil")) return "trangkil";
-    return null;
-  })();
-
-  const factoryBrand = userFactory === "kebonagung"
-    ? { title: "PG Kebon Agung", subtitle: "Malang, Jawa Timur" }
-    : userFactory === "trangkil"
-    ? { title: "PG Trangkil", subtitle: "Pati, Jawa Tengah" }
-    : { title: "Tebu AI", subtitle: "Industrial Grading" };
+  const factoryBrand = { title: "PG Kebon Agung", subtitle: "Malang, Jawa Timur" };
 
   return (
     <div className={`shell ${sidebarExpanded ? "sidebar-expanded" : "sidebar-collapsed"}`}>
@@ -167,7 +158,7 @@ export default function App() {
       >
         <div className="brand">
           <div className="brandMark" title={`${factoryBrand.title} — ${factoryBrand.subtitle}`}>
-            <img src={trangkilLogoSvg} alt={factoryBrand.title} className="brandLogoImg" />
+            <img src={kebonagungLogoSvg} alt={factoryBrand.title} className="brandLogoImg" />
           </div>
           <div className="brandText">
             <div className="brandTitleRow">
@@ -185,7 +176,7 @@ export default function App() {
 
         <nav className="sidebarNav" id="sidebar-navigation" aria-label="Navigasi halaman">
           {tabs.filter(item => {
-            const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", access: "user.read" };
+            const required: Record<TabId, string> = { dashboard: "dashboard.read", history: "history.read", guide: "dashboard.read", cameras: "camera.read", access: "user.read" };
             return permissions.includes(required[item.id]);
           }).map((item) => {
             const Icon = item.icon;
@@ -247,11 +238,12 @@ export default function App() {
           </div>
         </div>
       </aside>
-      <main className={(tab === "dashboard" || tab === "guide" || tab === "history") ? "dashboardMainFixed" : ""}>
-        {!permissions.some(permission => ["dashboard.read", "history.read", "user.read"].includes(permission)) && <p role="status">Akun ini belum memiliki akses halaman. Hubungi administrator untuk mengatur hak akses.</p>}
+      <main className="dashboardMainFixed">
+        {!permissions.some(permission => ["dashboard.read", "history.read", "camera.read", "user.read"].includes(permission)) && <p role="status">Akun ini belum memiliki akses halaman. Hubungi administrator untuk mengatur hak akses.</p>}
         {tab === "dashboard" && permissions.includes("dashboard.read") && <DashboardPage />}
         {tab === "guide" && permissions.includes("dashboard.read") && <QualityGuidePage />}
         {tab === "history" && permissions.includes("history.read") && <HistoryPage />}
+        {tab === "cameras" && permissions.includes("camera.read") && <CameraConfigurationPage />}
         {tab === "access" && permissions.includes("user.read") && <AccessManagement />}
       </main>
     </div>

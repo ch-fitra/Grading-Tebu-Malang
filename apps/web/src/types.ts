@@ -17,6 +17,8 @@ export type CameraRow = {
   id: number;
   name: string;
   rtspUrl: string;
+  station: number;
+  enabled: boolean;
   location: string;
   status: "online" | "offline";
 };
@@ -31,7 +33,7 @@ export type AiModel = {
 
 export type SystemStatus = {
   backend: { status: string };
-  ai: { status: string; model?: { name: string; version: string; available: boolean }; camera_1_live?: boolean; camera_2_live?: boolean; capabilities?: { conveyor_empty?: boolean } };
+  ai: { status: string; model?: { name: string; version: string; available: boolean }; cameras?: Record<string, { live: boolean; fps: number }>; capabilities?: { conveyor_empty?: boolean } };
   database: { status: string };
   websocket: { clients: number };
 };
@@ -65,7 +67,7 @@ export type DeletionRequest = {
   targetTitle: string;
   targetSubtitle?: string;
   snapshotPath?: string;
-  factory: "trangkil" | "kebonagung" | "all";
+  factory: "kebonagung";
   requestedBy: string;
   requestedAt: string;
   reason: string;

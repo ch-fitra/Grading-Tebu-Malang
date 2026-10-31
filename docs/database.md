@@ -1,31 +1,9 @@
-﻿# Database
+# Database Malang
 
-Proyek menggunakan dua database PostgreSQL:
+Dua database khusus: `sugarcane_malang` (akun, role, kamera, inspeksi) dan `sugarcane_ai_malang` (ROI, kamera AI, frame, agregasi). Server PostgreSQL dapat sama dengan Trangkil; konfigurasi lokal memakai 5433. Login `sugarcane_malang` terpisah dan bukan superuser.
 
-- `sugarcane`: data aplikasi, akun, role, kamera, inspeksi, dan persetujuan. Koneksi menggunakan `DATABASE_URL`.
-- `sugarcane_ai`: konfigurasi kamera/model AI, frame deteksi, dan ringkasan siklus. Koneksi menggunakan `AI_DATABASE_URL`.
+`npm run db:setup` memerlukan koneksi administrator sementara, membuat hanya objek Malang dan menulis kredensial ke `.env`. `npm run db:migrate` menjalankan SQL 001?007 pada database Malang. AI menjalankan migrasi native saat startup. API/AI menolak nama database Trangkil.
 
-## Database aplikasi
+Kamera aplikasi merupakan sumber konfigurasi utama. station=2 bukan berarti camera_id=2. Sinkronisasi AI menjaga ID sama dengan aplikasi dan hanya mengisi ROI kosong untuk station 2 dari referensi Malang. Riwayat dan ROI yang sudah ada tidak diimpor atau ditimpa oleh backup dua pabrik.
 
-Migrasi aktif berada di `database/postgres/` (001 sampai 006):
-
-```powershell
-npm run db:up
-npm run db:migrate
-```
-
-`db:up` hanya diperlukan jika memakai Docker Compose. PostgreSQL wajib tersedia sebelum API dijalankan. Sesuaikan host, port, nama database, dan kredensial pada `.env` bila memakai server sendiri.
-
-## Database AI
-
-Service AI menjalankan migrasi dari `apps/ai-service/db/migrations.py` saat startup. Service mencoba membuat `sugarcane_ai` jika belum tersedia. User membutuhkan izin membuat database, atau administrator harus menyiapkannya sebelum startup.
-
-Frame dan siklus tersimpan melalui `apps/ai-service/db/repository.py`. Snapshot lokal berada di `apps/ai-service/storage/snapshots/`; konfigurasi model berada di `apps/ai-service/models/active/config.json`.
-
-## Pemeliharaan
-
-Backup kedua database beserta model, konfigurasi ROI, dan snapshot yang diperlukan. `npm run db:down` menghentikan database Docker tanpa menghapus volume. Hindari `docker compose down -v` kecuali memang ingin menghapus seluruh data volume.
-
-## Asal pengukuran kotoran
-
-Migrasi `006_impurity_measurement.sql` menambah `inference_results.impurity_measured`. Nilai `true` menandai pengukuran kelas fisik daun/pucuk/sampah; `false` menandai klasifikasi grade tanpa pengukuran fisik. Nilai `NULL` pada data historis berarti asal pengukuran belum diketahui. UI dan ekspor tidak menyajikan probabilitas kelas mutu sebagai persentase kotoran. Migrasi ini tidak menulis ulang angka historis.
+Backup/restore harus membatasi dua database Malang beserta snapshot Malang. Jangan menjalankan restore penuh `database-before-trangkil.json` ke database aktif.

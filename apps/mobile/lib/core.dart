@@ -121,8 +121,8 @@ class AppState extends ChangeNotifier {
   static String get defaultUrl => configuredUrl.isNotEmpty
       ? configuredUrl
       : Platform.isIOS
-      ? 'http://127.0.0.1:4110'
-      : 'http://10.0.2.2:4110';
+      ? 'http://127.0.0.1:4111'
+      : 'http://10.0.2.2:4111';
   late final ApiClient api = ApiClient(baseUrl: defaultUrl);
   Row? user;
   Row status = {};
@@ -149,12 +149,12 @@ class AppState extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       api.baseUrl =
-          (await storage.read(key: 'api_url'))
+          (await storage.read(key: 'malang_api_url'))
               ?.trim()
               .replaceAll(RegExp(r'/$'), '') ??
           defaultUrl;
-      dark = (await storage.read(key: 'theme')) == 'dark';
-      api.token = await storage.read(key: 'token');
+      dark = (await storage.read(key: 'malang_theme')) == 'dark';
+      api.token = await storage.read(key: 'malang_token');
       if (api.token != null) {
         try {
           user = row(await api.request('GET', '/api/auth/me'));
@@ -187,7 +187,7 @@ class AppState extends ChangeNotifier {
       );
       api.token = s(session['token'], '');
       user = row(session['user']);
-      await storage.write(key: 'token', value: api.token);
+      await storage.write(key: 'malang_token', value: api.token);
       await refresh();
       _startRealtime();
     } catch (e) {
@@ -303,7 +303,7 @@ class AppState extends ChangeNotifier {
     // to an address entered in settings.
     await logout();
     api.baseUrl = normalized;
-    await storage.write(key: 'api_url', value: normalized);
+    await storage.write(key: 'malang_api_url', value: normalized);
     socket?.close();
     notifyListeners();
   }
@@ -311,7 +311,7 @@ class AppState extends ChangeNotifier {
   Future<void> setDark(bool value) async {
     dark = value;
     notifyListeners();
-    await storage.write(key: 'theme', value: value ? 'dark' : 'light');
+    await storage.write(key: 'malang_theme', value: value ? 'dark' : 'light');
   }
 
   Future<void> logout() async {
@@ -331,7 +331,7 @@ class AppState extends ChangeNotifier {
     roles = [];
     latest = {};
     status = {};
-    await storage.delete(key: 'token');
+    await storage.delete(key: 'malang_token');
     if (!_closed) notifyListeners();
   }
 

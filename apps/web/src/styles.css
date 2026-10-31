@@ -1275,9 +1275,6 @@ input:focus {
   color: var(--color-danger);
 }
 
-.kpiValue.impurityValue {
-  color: var(--color-amber);
-}
 
 .kpiValue.status-online {
   color: var(--color-primary);
@@ -3071,9 +3068,6 @@ button:disabled {
   font-weight: 850 !important;
 }
 
-.resultDetailValue.impurityVal {
-  color: var(--color-text) !important;
-}
 
 .resultDetailValue.gradeVal {
   padding: 4px 10px !important;
@@ -5254,7 +5248,7 @@ main {
 /* KPI Summary Cards Grid */
 .historyKpiGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 
@@ -5881,14 +5875,7 @@ main {
   color: var(--color-text);
 }
 
-.impurityText {
-  font-size: 11px;
-  font-weight: 800;
-}
 
-.impurityText.success { color: #10b981; }
-.impurityText.amber { color: #f59e0b; }
-.impurityText.danger { color: #ef4444; }
 
 .sessionStatusPill {
   font-size: 8.5px;
@@ -6846,7 +6833,7 @@ main.dashboardMainFixed {
   box-shadow: 0 0 22px rgba(37, 99, 235, 0.55), 0 0 18px rgba(0, 240, 255, 0.5);
 }
 
-.stationTrangkilLogo {
+.stationKebonAgungLogo {
   height: 22px;
   width: auto;
   max-width: 175px;
@@ -6855,7 +6842,7 @@ main.dashboardMainFixed {
   filter: drop-shadow(0 1px 2px rgba(0, 141, 220, 0.25));
 }
 
-.stationTrangkilLogoMini {
+.stationKebonAgungLogoMini {
   height: 16px;
   width: auto;
   max-width: 120px;
@@ -6882,7 +6869,7 @@ main.dashboardMainFixed {
   animation: logoShimmerPulseDark 2.8s infinite ease-in-out;
 }
 
-[data-theme="dark"] .stationTrangkilLogo {
+[data-theme="dark"] .stationKebonAgungLogo {
   filter: drop-shadow(0 0 8px rgba(0, 240, 255, 0.7)) brightness(1.2);
 }
 
@@ -7602,7 +7589,7 @@ main.dashboardMainFixed {
 /* Structured Column Headers */
 .eventFeedColHeader {
   display: grid;
-  grid-template-columns: 56px 42px 76px 1fr 42px;
+  grid-template-columns: 1fr 42px 76px 42px;
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
@@ -7616,9 +7603,6 @@ main.dashboardMainFixed {
   flex-shrink: 0;
 }
 
-.eventFeedColHeader span.colImp {
-  text-align: right;
-}
 .eventFeedColHeader span.colConf {
   text-align: right;
 }
@@ -7647,7 +7631,7 @@ main.dashboardMainFixed {
 
 .eventFeedRow {
   display: grid;
-  grid-template-columns: 56px 42px 76px 1fr 42px;
+  grid-template-columns: 1fr 42px 76px 42px;
   align-items: center;
   gap: 6px;
   padding: 7px 12px;
@@ -7726,34 +7710,9 @@ main.dashboardMainFixed {
   border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
-.eventFeedImpWrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-}
 
-.eventFeedImpurity {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-text);
-  font-variant-numeric: tabular-nums;
-}
 
-.eventFeedMiniBar {
-  width: 100%;
-  max-width: 44px;
-  height: 3px;
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
-}
 
-.eventFeedMiniBarFill {
-  height: 100%;
-  border-radius: 2px;
-  transition: width 300ms ease;
-}
 
 .eventFeedConf {
   font-size: 9.5px;
@@ -8031,18 +7990,6 @@ main.dashboardMainFixed {
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.photoImpBadge {
-  position: absolute;
-  bottom: 4px;
-  right: 4px;
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1.5px 5px;
-  border-radius: 3px;
-  background: rgba(2, 6, 23, 0.75);
-  color: #f8fafc;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
 
 .photoCardFooter.muted {
   justify-content: center;
@@ -8525,12 +8472,6 @@ main.dashboardMainFixed {
   flex-shrink: 0;
 }
 
-.dailyCycleImpurity {
-  font-size: 8.5px;
-  font-weight: 600;
-  color: var(--color-muted);
-  white-space: nowrap;
-}
 
 .dailyCycleGradeBadge {
   font-size: 8.5px;
@@ -8570,7 +8511,7 @@ main.dashboardMainFixed {
 /* KPI row */
 .catKpiRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   gap: 3px;
   width: 100%;
   min-width: 0;
@@ -10664,7 +10605,7 @@ main.dashboardMainFixed {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   PG TRANGKIL FRAME CLASSIFICATION & RECOMMENDATION METRICS
+   PG KEBON AGUNG FRAME CLASSIFICATION & RECOMMENDATION METRICS
    ═══════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
@@ -11083,7 +11024,7 @@ main.dashboardMainFixed {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   TAPPING RETROACTIVE AUTO-SYNC MODAL STYLES (PG TRANGKIL)
+   TAPPING RETROACTIVE AUTO-SYNC MODAL STYLES (PG KEBON AGUNG)
    ───────────────────────────────────────────────────────────────────────────── */
 
 .tappingSyncModalCard {
@@ -11551,8 +11492,8 @@ main.dashboardMainFixed {
   color: var(--color-muted);
 }
 
-/* PT Trangkil Multi-Meja Excel Import Banner: Harmonious Card Styling */
-.tappingTrangkilImportBanner {
+/* PG Kebon Agung Multi-Meja Excel Import Banner: Harmonious Card Styling */
+.tappingKebonAgungImportBanner {
   background: linear-gradient(135deg, rgba(239, 246, 255, 0.95) 0%, rgba(240, 253, 250, 0.85) 100%);
   border: 1.5px solid rgba(59, 130, 246, 0.22);
   box-shadow: 0 2px 10px rgba(37, 99, 235, 0.05);
@@ -11564,7 +11505,7 @@ main.dashboardMainFixed {
   animation: modalScaleIn 0.2s ease;
 }
 
-[data-theme="dark"] .tappingTrangkilImportBanner {
+[data-theme="dark"] .tappingKebonAgungImportBanner {
   background: linear-gradient(135deg, rgba(13, 27, 66, 0.8) 0%, rgba(6, 78, 59, 0.25) 100%);
   border-color: rgba(56, 189, 248, 0.28);
 }
@@ -11631,7 +11572,7 @@ main.dashboardMainFixed {
   color: #38bdf8;
 }
 
-.importTrangkilTag {
+.importKebonAgungTag {
   font-size: 9.5px;
   font-weight: 800;
   background: rgba(16, 185, 129, 0.12);
@@ -11641,7 +11582,7 @@ main.dashboardMainFixed {
   border-radius: 4px;
 }
 
-[data-theme="dark"] .importTrangkilTag {
+[data-theme="dark"] .importKebonAgungTag {
   background: rgba(16, 185, 129, 0.18);
   border-color: rgba(16, 185, 129, 0.35);
   color: #34d399;
@@ -12899,45 +12840,11 @@ main.dashboardMainFixed {
   line-height: 1.25;
 }
 
-.hero-impurity-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
 
-.impurity-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 5px 8px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 7px;
-}
 
-.impurity-chip.total {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(2, 132, 199, 0.08) 100%);
-  border: 1.5px solid rgba(37, 99, 235, 0.4);
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
-}
 
-.impurity-chip-label {
-  font-size: 8px;
-  color: var(--color-muted);
-  font-weight: 700;
-  text-transform: uppercase;
-}
 
-.impurity-chip.total .impurity-chip-label {
-  color: #2563eb;
-  font-weight: 800;
-}
 
-.impurity-chip-val {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--color-text);
-}
 
 /* 7-Grade Distribution Card */
 .capture-grades-dist-card {
@@ -13194,19 +13101,8 @@ main.dashboardMainFixed {
   border-color: rgba(56, 189, 248, 0.2) !important;
 }
 
-[data-theme="dark"] .impurity-chip {
-  background: rgba(15, 23, 42, 0.75) !important;
-  border-color: rgba(56, 189, 248, 0.2) !important;
-}
 
-[data-theme="dark"] .impurity-chip.total {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.25) 0%, rgba(2, 132, 199, 0.15) 100%) !important;
-  border-color: rgba(56, 189, 248, 0.45) !important;
-}
 
-[data-theme="dark"] .impurity-chip.total .impurity-chip-label {
-  color: #38bdf8 !important;
-}
 
 [data-theme="dark"] .capture-frame-popup__footer {
   background: linear-gradient(180deg, #0b1329 0%, rgba(15, 23, 42, 0.95) 100%) !important;
@@ -13720,10 +13616,6 @@ main.dashboardMainFixed {
   display: inline-block;
 }
 
-.impurity-val {
-  font-size: 10px;
-  font-weight: 850;
-}
 
 .conf-val {
   font-size: 9.5px;
@@ -16231,7 +16123,7 @@ main.dashboardMainFixed {
 .qualityGuideCardTitle h2 { margin:0; font-size:17px; color:var(--color-text); }
 .qualityGuideCardTitle > span { font-size:10px; font-weight:700; }
 .qualityGuideDescription { margin:0; font-size:11px; color:var(--color-muted); }
-.qualityGuideMetrics { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.qualityGuideMetrics { display:grid; grid-template-columns:1fr; gap:6px; }
 .qualityGuideMetrics > div { padding:7px; border-radius:7px; background:var(--color-surface-soft); border:1px solid var(--color-border); display:flex; flex-direction:column; gap:3px; }
 .qualityGuideMetrics span { font-size:9px; color:var(--color-muted); }
 .qualityGuideMetrics strong { font-size:11px; color:var(--color-text); }
@@ -16254,7 +16146,7 @@ main.dashboardMainFixed {
 .dashboardPage.newLayout .eventFeedList { min-height:260px; overflow:hidden; }
 .dashboardPage.newLayout .eventFeedRow { min-height:26px; flex:1 0 26px; padding:3px 8px; line-height:1.1; box-sizing:border-box; }
 .dashboardPage.newLayout .eventFeedRow,
-.dashboardPage.newLayout .eventFeedColHeader { grid-template-columns:minmax(50px,1fr) minmax(28px,.55fr) minmax(52px,1fr) minmax(50px,1fr) minmax(40px,.8fr); gap:6px; }
+.dashboardPage.newLayout .eventFeedColHeader { grid-template-columns:minmax(50px,1fr) minmax(28px,.55fr) minmax(52px,1fr) minmax(40px,.8fr); gap:6px; }
 .dashboardPage.newLayout .eventFeedRow { border-top:0; border-right:0; }
 .dashboardPage.newLayout .eventFeedColHeader { border-left:2.5px solid transparent; box-sizing:border-box; }
 .dashboardPage.newLayout .eventFeedColHeader > span,
@@ -16262,7 +16154,6 @@ main.dashboardMainFixed {
 .dashboardPage.newLayout .eventFeedConf { text-align:center; }
 .dashboardPage.newLayout .eventFeedId { justify-self:center; min-width:28px; box-sizing:border-box; }
 .dashboardPage.newLayout .eventFeedGrade { justify-self:center; width:100%; max-width:58px; box-sizing:border-box; }
-.dashboardPage.newLayout .eventFeedImpWrapper { align-items:center; }
 .dashboardPage.newLayout .eventFeedHeader { min-height:28px; padding:3px 8px; box-sizing:border-box; }
 .dashboardPage.newLayout .eventFeedColHeader { padding:4px 8px; font-size:8px; }
 .dashboardPage.newLayout .eventFeedGrade { padding:2px 4px; font-size:10px; }
@@ -16501,7 +16392,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
  .stationHeaderActionBtn, .stationThemeToggleBtn { min-width:32px; min-height:32px; justify-content:center; padding:6px; }
  .stationMbsTabs { display:none; }
  .responsiveMbsSelect { display:block; }
- .stationTrangkilLogo { max-width:170px; width:auto; }
+ .stationKebonAgungLogo { max-width:170px; width:auto; }
  .historyTitleBadge { font-size:10px; }
 }
 @container workspace (max-width:600px) {
@@ -16509,7 +16400,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
  .stationHeaderLeft { gap:5px; }
  .stationHeaderRight { gap:4px; flex-wrap:nowrap; }
  .stationLogoBadge { padding:3px; min-width:0; }
- .stationTrangkilLogo { max-width:125px; max-height:30px; }
+ .stationKebonAgungLogo { max-width:125px; max-height:30px; }
  .stationClock { font-size:10px; padding:5px; }
  .stationClock svg, .stationThemeToggleBtn > span, .historyTitleBadge { display:none; }
  .stationStatusChips { display:none; }
@@ -16580,7 +16471,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
 .historyPageContainer[data-compact="true"] .historyHeaderActions .historyExportBtn span { display:none; }
 .historyPageContainer[data-compact="true"] .historyHeaderActions button { min-width:32px; min-height:32px; padding:5px; }
 .historyPageContainer[data-compact="true"] .responsiveFilterToggle { display:flex; align-items:center; gap:4px; border:1px solid var(--color-border); border-radius:7px; background:var(--color-surface); color:var(--color-primary); font-size:11px; cursor:pointer; }
-.historyPageContainer[data-compact="true"] .historyKpiGrid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+.historyPageContainer[data-compact="true"] .historyKpiGrid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
 .historyPageContainer[data-compact="true"] .historyKpiCard { padding:6px !important; }
 .historyPageContainer[data-compact="true"] .historyKpiLabel { font-size:8px; line-height:1.25; }
 .historyPageContainer[data-compact="true"] .historyKpiValue { font-size:18px; }
@@ -17021,4 +16912,49 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
     flex:0 0 44px !important;
   }
   .shell .sidebar .sidebarLogout { width:100% !important; }
+}
+
+/* Malang: preserve the camera's full frame and ten detection rows per page. */
+.dashboardPage.newLayout .stationLeftPanel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dashboardPage.newLayout:not([data-compact="true"]) .streamVideoArea:not(.fullscreenMode) {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+.dashboardPage.newLayout .streamVideoArea .liveStreamImg {
+  object-fit: contain;
+  object-position: center;
+}
+.dashboardPage.newLayout .streamVideoArea.fullscreenMode {
+  max-height: none !important;
+  max-width: none !important;
+}
+.dashboardPage.newLayout .streamVideoArea.fullscreenMode .streamVideoContainer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.dashboardPage.newLayout .streamVideoArea.fullscreenMode .liveStreamImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.dashboardPage.newLayout .eventFeedCard {
+  flex: 1 0 336px;
+  min-height: 336px;
+}
+.dashboardPage.newLayout .eventFeedList.hasEvents {
+  display: grid;
+  grid-template-rows: repeat(10, minmax(26px, 1fr));
+  min-height: 260px;
+  overflow: hidden;
+}
+.dashboardPage.newLayout .eventFeedList.hasEvents .eventFeedRow {
+  min-height: 26px;
+  min-width: 0;
 }

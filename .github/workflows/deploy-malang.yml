@@ -1,0 +1,19 @@
+name: Malang validation
+on:
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run typecheck
+      - run: npm run build
+# Production is started locally with scripts/start-malang.ps1.
+# No Trangkil runner, deployment hook or remote production directory is used.

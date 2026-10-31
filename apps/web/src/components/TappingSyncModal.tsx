@@ -35,8 +35,8 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
   const [allImportedRecords, setAllImportedRecords] = useState<TappingRecord[]>([]);
   const [fileStats, setFileStats] = useState<FileImportStats | null>(null);
 
-  // Settings & Filters: DEFAULT TO MBS 5 (since PT Trangkil only has MBS 5 active)
-  const [targetLine, setTargetLine] = useState<number | "all">(5);
+  // Settings & Filters: DEFAULT TO MBS 2 (since PG Kebon Agung only has MBS 2 active)
+  const [targetLine, setTargetLine] = useState<number | "all">(2);
   const [onlyUnassigned, setOnlyUnassigned] = useState(true);
   const [dateFilter, setDateFilter] = useState<"today" | "all">("all");
   const [searchFilter, setSearchFilter] = useState("");
@@ -55,8 +55,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
     return truckSessions
       .filter((s) => {
         const camera = cameras.find(camera => camera.id === s.line);
-        if (camera && !`${camera.name} ${camera.location}`.toLowerCase().includes("trangkil")) return false;
-        if (!camera && s.line !== 2 && s.line !== 5) return false;
+        if (!camera) return false;
         if (targetLine !== "all") {
           const station = resolveMbsStation(s.line, cameras);
           if (station.mbsNum !== targetLine) return false;
@@ -81,7 +80,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
   }, [truckSessions, targetLine, onlyUnassigned, dateFilter, cameras]);
 
   // Active records: Filter allImportedRecords according to selected targetLine
-  // (Defaults to MBS 5, giving the exact ~1,487 records from PT Trangkil!)
+  // (Defaults to MBS 2, giving the exact ~1,487 records from PG Kebon Agung!)
   const activeRecords = useMemo(() => {
     if (allImportedRecords.length === 0) return [];
     if (targetLine === "all") return allImportedRecords;
@@ -132,8 +131,8 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
       setReconciliationRows([]);
       setAllImportedRecords(parsed.records);
       setFileStats(parsed.stats);
-      // Ensure targetLine is default MBS 5 (the active line at PT Trangkil)
-      setTargetLine(5);
+      // Ensure targetLine is default MBS 2 (the active line at PG Kebon Agung)
+      setTargetLine(2);
     } catch (err) {
       if (version === uploadVersion.current) setErrorMessage(err instanceof Error ? err.message : "Gagal memproses file Excel/CSV.");
     } finally {
@@ -146,13 +145,13 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
   const handleDownloadTemplate = () => {
     const header = ["kd_antrian", "no_meja", "mbs", "kode", "tgl_nilai", "tgl_daftar"];
     const rows = [
-      ["26K175617", "5", "3", "A", "2026-09-30 12:20:32.000", "2026-09-30 12:13:24.326"],
-      ["26K175615", "5", "3", "A", "2026-09-30 12:23:53.000", "2026-09-30 12:19:45.986"],
-      ["26K175619", "5", "3", "A", "2026-09-30 12:29:02.000", "2026-09-30 12:24:07.730"],
-      ["26K175548", "5", "5", "B", "2026-09-30 12:33:04.000", "2026-09-30 12:28:45.523"],
-      ["26K175623", "5", "4", "D", "2026-09-30 12:54:57.000", "2026-09-30 12:51:25.300"]
+      ["26K175617", "2", "3", "A", "2026-09-30 12:20:32.000", "2026-09-30 12:13:24.326"],
+      ["26K175615", "2", "3", "A", "2026-09-30 12:23:53.000", "2026-09-30 12:19:45.986"],
+      ["26K175619", "2", "3", "A", "2026-09-30 12:29:02.000", "2026-09-30 12:24:07.730"],
+      ["26K175548", "2", "5", "B", "2026-09-30 12:33:04.000", "2026-09-30 12:28:45.523"],
+      ["26K175623", "2", "4", "D", "2026-09-30 12:54:57.000", "2026-09-30 12:51:25.300"]
     ];
-    downloadCsv("DATA_CONTOH_PT_TRANGKIL.csv", [header, ...rows]);
+    downloadCsv("DATA_CONTOH_PT_KEBONAGUNG.csv", [header, ...rows]);
   };
 
   const handleReassign = (cycleId: string, tappingId: string) => {
@@ -254,14 +253,14 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
             </div>
             <div>
               <div className="tappingSyncHeaderTags">
-                <span className="tappingSyncTagPG">PT TRANGKIL (PATI)</span>
+                <span className="tappingSyncTagPG">PG KEBON AGUNG (MALANG)</span>
                 <span className="tappingSyncTagOption">IMPORT DATA EXCEL PABRIK</span>
               </div>
               <h2 id="sync-modal-title" className="tappingSyncTitle">
                 Rekonsiliasi Otomatis Data Excel Pabrik (Auto-Sync Tapping)
               </h2>
               <p className="tappingSyncSubtitle">
-                Unggah langsung file Excel asli PT Trangkil (seluruh MBS 1–5). Sistem otomatis memfilter dan mencocokkan Meja 5 (MBS 5 aktif) serta membandingkan Grade Pabrik vs AI.
+                Unggah langsung file Excel asli PG Kebon Agung (seluruh MBS 1–5). Sistem otomatis memfilter dan mencocokkan Meja 2 (MBS 2 aktif) serta membandingkan Grade Pabrik vs AI.
               </p>
             </div>
           </div>
@@ -290,7 +289,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
               <div>
                 <strong>Berhasil Menyinkronkan!</strong>
                 <p>
-                  Sebanyak {submitSuccessCount} siklus inspeksi Meja Tebu telah diperbarui dengan nomor antrean dan grade pabrik PT Trangkil.
+                  Sebanyak {submitSuccessCount} siklus inspeksi Meja Tebu telah diperbarui dengan nomor antrean dan grade pabrik PG Kebon Agung.
                 </p>
               </div>
             </div>
@@ -315,7 +314,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                 type="button"
                 className="tappingSyncHelperBtn ghost"
                 onClick={handleDownloadTemplate}
-                title="Download template file CSV sesuai format resmi PT Trangkil"
+                title="Download template file CSV sesuai format resmi PG Kebon Agung"
               >
                 <Download size={14} />
                 <span>Format Kolom Excel / CSV</span>
@@ -365,9 +364,9 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
             </div>
           )}
 
-          {/* ─── PT Trangkil Multi-Meja Import Banner & Chips ─── */}
+          {/* ─── PG Kebon Agung Multi-Meja Import Banner & Chips ─── */}
           {fileStats && (
-            <div className="tappingTrangkilImportBanner">
+            <div className="tappingKebonAgungImportBanner">
               <div className="importBannerTop">
                 <div className="importBannerFileDetails">
                   <FileSpreadsheet size={18} className="excelFileIcon" />
@@ -377,12 +376,12 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                       <span className="importRecordCountTag">
                         {fileStats.totalRecords.toLocaleString("id-ID")} Baris Data Dimuat
                       </span>
-                      <span className="importTrangkilTag">Format PT Trangkil Terdeteksi ✓</span>
+                      <span className="importKebonAgungTag">Format kolom tapping dikenali ✓</span>
                     </div>
                     <p className="importBannerNote">
                       Seluruh data Meja 1–5 tersimpan di memori sistem. Karena saat ini baru{" "}
-                      <strong>MBS 5</strong> yang aktif di PT Trangkil, sistem secara otomatis
-                      memilih <strong>no_meja = 5</strong> ({fileStats.byMeja[5] || 0} data) untuk
+                      <strong>MBS 2</strong> yang aktif di PG Kebon Agung, sistem secara otomatis
+                      memilih <strong>no_meja = 2</strong> ({fileStats.byMeja[2] || 0} data) untuk
                       rekonsiliasi langsung.
                     </p>
                   </div>
@@ -406,19 +405,19 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
               <div className="importMejaDistributionBar">
                 <span className="mejaChipsLabel">PILIH JALUR MEJA (MBS):</span>
                 <div className="mejaChipsList">
-                  {/* Default Active MBS 5 Button */}
+                  {/* Default Active MBS 2 Button */}
                   <button
                     type="button"
-                    className={`importMejaChip activeLineChip ${targetLine === 5 ? "selected" : ""}`}
-                    onClick={() => setTargetLine(5)}
-                    title="Tampilkan dan cocokkan khusus Meja 5 (MBS 5 aktif)"
+                    className={`importMejaChip activeLineChip ${targetLine === 2 ? "selected" : ""}`}
+                    onClick={() => setTargetLine(2)}
+                    title="Tampilkan dan cocokkan khusus Meja 2 (MBS 2 aktif)"
                   >
                     <span className="chipLiveDot" />
-                    <strong>MBS 5 (Aktif)</strong>
-                    <span className="chipBadgeCount">{fileStats.byMeja[5] || 0} Truk</span>
+                    <strong>MBS 2 (Aktif)</strong>
+                    <span className="chipBadgeCount">{fileStats.byMeja[2] || 0} Truk</span>
                   </button>
 
-                  {[1, 2, 3, 4].map((lineNum) => (
+                  {[1, 3, 4, 5].map((lineNum) => (
                     <button
                       key={lineNum}
                       type="button"
@@ -506,7 +505,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                     <th style={{ width: "35px" }}>#</th>
                     <th>Siklus AI Meja Tebu</th>
                     <th style={{ width: "120px" }}>Jeda Waktu</th>
-                    <th>Data Truk & Grade PT Trangkil</th>
+                    <th>Data Truk & Grade PG Kebon Agung</th>
                     <th style={{ width: "140px", textAlign: "right" }}>Koreksi Urutan</th>
                   </tr>
                 </thead>
@@ -571,8 +570,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                               </span>
                               <span>•</span>
                               <span>
-                                {cycle.totalCaptures} Frame • Impurity:{" "}
-                                <strong>{cycle.impurityMeasured ? `${cycle.averageImpurity.toFixed(1)}%` : "Tidak diukur"}</strong>
+                                {cycle.totalCaptures} Frame
                               </span>
                             </div>
                           </div>
@@ -612,7 +610,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                           )}
                         </td>
 
-                        {/* Right: Matched PT Trangkil Record & Dropdown Selector */}
+                        {/* Right: Matched PG Kebon Agung Record & Dropdown Selector */}
                         <td>
                           {allImportedRecords.length === 0 ? (
                             <div className="tappingWaitingUpload">
@@ -631,7 +629,7 @@ export function TappingSyncModal({ isOpen, onClose, onSuccess }: TappingSyncModa
                                   <option value="">— Lewati / Tidak Dipasangkan —</option>
                                   {activeRecords.filter(t => t.noMeja === undefined || t.noMeja === station.mbsNum).map((t) => (
                                     <option key={t.id} value={t.id}>
-                                      [{t.queueNumber}] Meja {t.noMeja ?? 5} — Grade: {t.factoryGrade || "-"} ({t.tappingTimeStr})
+                                      [{t.queueNumber}] Meja {t.noMeja ?? 2} — Grade: {t.factoryGrade || "-"} ({t.tappingTimeStr})
                                     </option>
                                   ))}
                                 </select>

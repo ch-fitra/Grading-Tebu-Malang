@@ -49,7 +49,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 30),
                   Text(
-                    'Selamat datang di Tebu AI',
+                    'TebuAI Malang - PG Kebon Agung',
                     style: Theme.of(context).textTheme.headlineMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
@@ -122,7 +122,7 @@ class _LoginPageState extends State<LoginPage> {
                         keyboardType: TextInputType.url,
                         decoration: const InputDecoration(
                           labelText: 'Alamat API',
-                          hintText: 'http://10.0.2.2:4110',
+                          hintText: 'http://10.0.2.2:4111',
                         ),
                       ),
                       const SizedBox(height: 8),
