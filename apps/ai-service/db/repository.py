@@ -38,10 +38,12 @@ class AIRepository:
                         is_active=EXCLUDED.is_active,updated_at=NOW()""",
                         (camera["id"], f"CAM_API_{camera['id']}", camera["name"], camera["rtsp_url"],
                          camera["location"], bool(camera["enabled"] and camera["rtsp_url"])))
-                    # Seed only cameras without a saved ROI; operator calibration is preserved.
+                    # Upgrade the old default; preserve custom operator calibration.
                     template = malang_roi(camera["id"], camera["station"])
                     if template is not None:
-                        cursor.execute("UPDATE ai_cameras SET roi_config=%s WHERE id=%s AND roi_config IS NULL",
+                        cursor.execute("""UPDATE ai_cameras SET roi_config=%s WHERE id=%s AND (roi_config IS NULL OR
+                            (roi_config->>'x'='0.58' AND roi_config->>'y'='0.08'
+                             AND roi_config->>'width'='0.39' AND roi_config->>'height'='0.62'))""",
                                        (json.dumps(template), camera["id"]))
 
     @staticmethod
@@ -245,7 +247,7 @@ class AIRepository:
     @staticmethod
     def complete_auto_inspection(cycle_code: str, summary: Dict[str, Any]):
         grade = summary.get("majority_class")
-        decision = ("MBS" if grade in ("S", "M", "A") else "NON_MBS" if grade in ("D", "B")
+        decision = ("MBS" if grade in ("MBS", "MBS Bintang", "MBS Plus", "S", "M", "A") else "NON_MBS" if grade in ("Non MBS", "D", "B")
                     else "DITOLAK_DO" if grade in ("G", "X") else "PENDING")
         with closing(get_auth_db_connection()) as conn, conn:
             with conn.cursor() as cursor:

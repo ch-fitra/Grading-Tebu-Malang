@@ -1,4 +1,5 @@
-export type Grade = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
+// Legacy codes remain readable in saved history. New detections use the Malang labels.
+export type Grade = "ATPSD" | "Akar Tanah" | "Daduk" | "Kocok Air" | "MBS" | "MBS Bintang" | "MBS Plus" | "Non MBS" | "Sogolan Pucuk" | "Tebu Muda" | "Terbakar" | "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
 
 export type ClassPercentages = {
   daun?: number;

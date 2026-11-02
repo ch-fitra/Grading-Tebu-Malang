@@ -1,6 +1,8 @@
-export type KebonAgungGradeCode = "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
+import type { Grade } from "../types";
+export type KebonAgungGradeCode = Grade;
 
 export interface KebonAgungGradeItem {
+  index?: number;
   code: KebonAgungGradeCode;
   label: string;
   name: string;
@@ -18,132 +20,194 @@ export interface KebonAgungGradeItem {
 
 export const KEBONAGUNG_GRADES: KebonAgungGradeItem[] = [
   {
-    code: "S",
-    label: "MBS S",
-    name: "Super",
-    rafaksi: "0% (Bebas)",
-    status: "Lolos Prima",
-    statusCls: "s",
-    badgeCls: "badge-s",
-    img: "/grades/mbs-s.jpg",
-    color: "#2563eb",
-    grad: "linear-gradient(90deg, #1d4ed8, #00d2ff)",
-    kriteria: "Tebu super bersih, bebas daun & pucuk. Lolos langsung giling tanpa potongan bobot.",
-    decision: "✓ Lolos Giling (Mutu Prima)",
-    tier: "bebas"
+    "index": 0,
+    "code": "ATPSD",
+    "label": "ATPSD",
+    "name": "Indeks model 0",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 0",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#64748b",
+    "grad": "linear-gradient(90deg, #64748b, #64748b)",
+    "kriteria": "Kelas ATPSD, sesuai indeks 0 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "M",
-    label: "MBS M",
-    name: "Stempel Simbol M",
-    rafaksi: "0% (Bebas)",
-    status: "Standar Ideal",
-    statusCls: "m",
-    badgeCls: "badge-m",
-    img: "/grades/mbs-m.jpg",
-    color: "#0284c7",
-    grad: "linear-gradient(90deg, #0284c7, #38bdf8)",
-    kriteria: "Referensi kelas M (validasi QC Malang diperlukan). Lolos giling tanpa potongan bobot.",
-    decision: "✓ Lolos Giling (Standar Utama M)",
-    tier: "bebas"
+    "index": 1,
+    "code": "Akar Tanah",
+    "label": "Akar Tanah",
+    "name": "Indeks model 1",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 1",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#92400e",
+    "grad": "linear-gradient(90deg, #92400e, #92400e)",
+    "kriteria": "Kelas Akar Tanah, sesuai indeks 1 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "A",
-    label: "MBS A",
-    name: "Stempel Simbol A",
-    rafaksi: "0% (Bebas)",
-    status: "Toleransi Giling",
-    statusCls: "a",
-    badgeCls: "badge-a",
-    img: "/grades/mbs-a.jpg",
-    color: "#059669",
-    grad: "linear-gradient(90deg, #059669, #34d399)",
-    kriteria: "Batas toleransi layak giling (Simbol A). Terdapat daun ringan tanpa sanksi bobot.",
-    decision: "✓ Lolos Toleransi Giling (Simbol A)",
-    tier: "bebas"
+    "index": 2,
+    "code": "Daduk",
+    "label": "Daduk",
+    "name": "Indeks model 2",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 2",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#ca8a04",
+    "grad": "linear-gradient(90deg, #ca8a04, #ca8a04)",
+    "kriteria": "Kelas Daduk, sesuai indeks 2 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "D",
-    label: "MBS D",
-    name: "Potongan Bobot 1%",
-    rafaksi: "-1,0% Bobot",
-    status: "Pengawasan",
-    statusCls: "d",
-    badgeCls: "badge-d",
-    img: "/grades/mbs-d.jpg",
-    color: "#d97706",
-    grad: "linear-gradient(90deg, #d97706, #fbbf24)",
-    kriteria: "Kelas D. Diterima dengan kebijakan potongan bobot 1%.",
-    decision: "⚠ Diterima Rafaksi Ringan (-1%)",
-    tier: "rafaksi"
+    "index": 3,
+    "code": "Kocok Air",
+    "label": "Kocok Air",
+    "name": "Indeks model 3",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 3",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#0891b2",
+    "grad": "linear-gradient(90deg, #0891b2, #0891b2)",
+    "kriteria": "Kelas Kocok Air, sesuai indeks 3 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "B",
-    label: "MBS B",
-    name: "Potongan Bobot 2,5%",
-    rafaksi: "-2,5% Bobot",
-    status: "Sortir Meja",
-    statusCls: "b",
-    badgeCls: "badge-b",
-    img: "/grades/mbs-b.jpg",
-    color: "#ea580c",
-    grad: "linear-gradient(90deg, #ea580c, #fb923c)",
-    kriteria: "Kelas B. Diterima dengan kebijakan potongan bobot 2,5%.",
-    decision: "⚠ Diterima Rafaksi Berat (-2.5%)",
-    tier: "rafaksi"
+    "index": 4,
+    "code": "MBS",
+    "label": "MBS",
+    "name": "Indeks model 4",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 4",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#059669",
+    "grad": "linear-gradient(90deg, #059669, #059669)",
+    "kriteria": "Kelas MBS, sesuai indeks 4 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "T", label: "MBS T", name: "Menunggu keputusan QC manual",
-    rafaksi: "Ditentukan QC", status: "Perlu keputusan QC",
-    statusCls: "t", badgeCls: "badge-t", img: "/grades/mbs-t.png",
-    color: "#9333ea", grad: "linear-gradient(90deg, #9333ea, #c084fc)",
-    kriteria: "Kelas T sesuai hasil model dan database. Keputusan giling dan rafaksi menunggu peninjauan QC secara manual.",
-    decision: "Menunggu keputusan QC manual", tier: "manual"
+    "index": 5,
+    "code": "MBS Bintang",
+    "label": "MBS Bintang",
+    "name": "Indeks model 5",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 5",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#2563eb",
+    "grad": "linear-gradient(90deg, #2563eb, #2563eb)",
+    "kriteria": "Kelas MBS Bintang, sesuai indeks 5 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "G",
-    label: "MBS G",
-    name: "Ditolak Giling",
-    rafaksi: "Reject Giling",
-    status: "Ditolak Meja",
-    statusCls: "g",
-    badgeCls: "badge-g",
-    img: "/grades/mbs-g.jpg",
-    color: "#dc2626",
-    grad: "linear-gradient(90deg, #dc2626, #f87171)",
-    kriteria: "Kelas G. Ditolak di meja tebu dan memerlukan sortir ulang.",
-    decision: "✕ Ditolak Giling (Reject Meja)",
-    tier: "tolak"
+    "index": 6,
+    "code": "MBS Plus",
+    "label": "MBS Plus",
+    "name": "Indeks model 6",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 6",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#0d9488",
+    "grad": "linear-gradient(90deg, #0d9488, #0d9488)",
+    "kriteria": "Kelas MBS Plus, sesuai indeks 6 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
   {
-    code: "X",
-    label: "MBS X",
-    name: "Afkir Mutlak",
-    rafaksi: "Tolak Mutlak",
-    status: "Afkir Total",
-    statusCls: "x",
-    badgeCls: "badge-x",
-    img: "/grades/mbs-x.jpg",
-    color: "#991b1b",
-    grad: "linear-gradient(90deg, #7f1d1d, #ef4444)",
-    kriteria: "Tercampur batu, kayu, tanah gumpal, atau tebu busuk. Ditolak mutlak karena bahaya gilingan.",
-    decision: "✕ Ditolak Mutlak (Afkir / Tolak DO)",
-    tier: "tolak"
+    "index": 7,
+    "code": "Non MBS",
+    "label": "Non MBS",
+    "name": "Indeks model 7",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 7",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#ea580c",
+    "grad": "linear-gradient(90deg, #ea580c, #ea580c)",
+    "kriteria": "Kelas Non MBS, sesuai indeks 7 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
   },
+  {
+    "index": 8,
+    "code": "Sogolan Pucuk",
+    "label": "Sogolan Pucuk",
+    "name": "Indeks model 8",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 8",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#65a30d",
+    "grad": "linear-gradient(90deg, #65a30d, #65a30d)",
+    "kriteria": "Kelas Sogolan Pucuk, sesuai indeks 8 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
+  },
+  {
+    "index": 9,
+    "code": "Tebu Muda",
+    "label": "Tebu Muda",
+    "name": "Indeks model 9",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 9",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#9333ea",
+    "grad": "linear-gradient(90deg, #9333ea, #9333ea)",
+    "kriteria": "Kelas Tebu Muda, sesuai indeks 9 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
+  },
+  {
+    "index": 10,
+    "code": "Terbakar",
+    "label": "Terbakar",
+    "name": "Indeks model 10",
+    "rafaksi": "Ditentukan QC",
+    "status": "Kelas 10",
+    "statusCls": "m",
+    "badgeCls": "badge-m",
+    "img": "/grades/malang-reference.svg",
+    "color": "#dc2626",
+    "grad": "linear-gradient(90deg, #dc2626, #dc2626)",
+    "kriteria": "Kelas Terbakar, sesuai indeks 10 pada model Malang. Keputusan operasional dan rafaksi mengikuti penilaian QC.",
+    "decision": "Menunggu keputusan QC",
+    "tier": "manual"
+  }
 ];
 
 export function normalizeGrade(rawGrade?: string | null): KebonAgungGradeCode {
-  if (!rawGrade) return "M";
-  const g = rawGrade.toUpperCase().trim().replace(/^MBS\s*/, "").trim();
-  if (g === "S") return "S";
-  if (g === "M") return "M";
-  if (g === "A") return "A";
-  if (g === "D") return "D";
-  if (g === "B") return "B";
-  if (g === "T") return "T";
-  if (g === "G" || g === "REJECT" || g === "REJECT_G") return "G";
-  if (g === "X" || g === "REJECT_X") return "X";
-  if (g === "C") return "D";
-  if (g === "A/M") return "A";
-  return "M";
+  const value = rawGrade?.trim() ?? "";
+  return (KEBONAGUNG_GRADES.find(item => item.code.toLowerCase() === value.toLowerCase())?.code ?? value) as Grade;
+}
+
+export function gradeDefinition(rawGrade?: string | null): KebonAgungGradeItem {
+  const code = normalizeGrade(rawGrade);
+  return KEBONAGUNG_GRADES.find(item => item.code === code) ?? {
+    code, label: code || "?", name: code ? "Kelas riwayat" : "Belum ada deteksi",
+    rafaksi: "Ditentukan QC", status: "Referensi", statusCls: "m", badgeCls: "badge-m",
+    img: "/grades/malang-reference.svg", color: "#64748b", grad: "#64748b",
+    kriteria: "Data riwayat atau belum ada hasil model Malang.", decision: "Menunggu keputusan QC", tier: "manual"
+  };
 }

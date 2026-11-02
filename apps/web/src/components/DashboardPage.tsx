@@ -59,7 +59,7 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-import { KEBONAGUNG_GRADES, normalizeGrade } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, gradeDefinition, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
@@ -567,7 +567,7 @@ export function DashboardPage() {
       const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
       return {
         confidence: avgConf,
-        grade: dominantGrade(activeCycleFrames) ?? "M",
+        grade: dominantGrade(activeCycleFrames) ?? normalizeGrade(),
         classScores: meanClassScores(activeCycleFrames),
         id: activeCycleFrames[0]?.id || 0,
         timestamp: activeCycle.startedAt,
@@ -582,7 +582,7 @@ export function DashboardPage() {
       const count = cycleModelFrames.length;
       return {
         confidence: cycleModelFrames.reduce((sum, frame) => sum + frame.confidence, 0) / count,
-        grade: dominantGrade(cycleModelFrames) ?? "M",
+        grade: dominantGrade(cycleModelFrames) ?? normalizeGrade(),
         classScores: meanClassScores(cycleModelFrames),
         id: cycleModelFrames[0]?.id || 0,
         timestamp: selectedCycle?.startedAt ?? cycleModelFrames[0].timestamp,
@@ -601,7 +601,7 @@ export function DashboardPage() {
     const end = cycle.completedAt ? new Date(cycle.completedAt).getTime() : Date.now();
     const frames = analysisFrames.filter(item =>
       new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000);
-    return dominantGrade(frames) ?? "M";
+    return dominantGrade(frames) ?? normalizeGrade();
   };
   // Agregasi Seluruh Siklus Meja Tebu untuk Stasiun / Pabrik ini
   const dailyCyclesStats = useMemo(() => {
@@ -619,7 +619,7 @@ export function DashboardPage() {
       ? cycles.reduce((acc, c) => acc + (c.averageConfidence ?? 0), 0) / cycles.length
       : 0.88;
 
-    const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? "M";
+    const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? normalizeGrade();
 
     // Hitung distribusi kelas dari seluruh siklus
     const gradeCounts = KEBONAGUNG_GRADES.map((tg) => {
@@ -636,13 +636,13 @@ export function DashboardPage() {
     });
 
     // Hitung persentase lolos (S, M, A) vs kena sanksi/reject (D, B, G, X)
-    const passCount = cycles.filter(c => ["S", "M", "A"].includes(cycleGrade(c))).length;
+    const passCount = cycles.filter(c => ["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(cycleGrade(c))).length;
     const passPct = Math.round((passCount / totalCycles) * 100);
 
     // List siklus berurutan dengan info grade dan impuritas masing-masing
     const cycleTimeline = cycles.map((c, idx) => {
       const cGrade = cycleGrade(c);
-      const gradeDef = KEBONAGUNG_GRADES.find(g => g.code === cGrade) || KEBONAGUNG_GRADES[1];
+      const gradeDef = gradeDefinition(cGrade);
       return {
         id: c.id,
         number: idx + 1,
@@ -692,7 +692,7 @@ export function DashboardPage() {
       (item.code === grade ? gradeConf * 100 : 0)) : 0
   })), [effectiveInference, grade, gradeConf, hasLatestInference]);
 
-  // Statistik Konsistensi Siklus Meja Tebu (7 Kelas PG Kebon Agung)
+  // Statistik Konsistensi Siklus Meja Tebu (11 Kelas Malang)
   const cycleConsistency = useMemo(() => {
     if (!cycleModelFrames || cycleModelFrames.length === 0) return null;
     const total = cycleModelFrames.length;
@@ -721,17 +721,17 @@ export function DashboardPage() {
 
     cycles.forEach((c) => {
       const g = cycleGrade(c);
-      if (["S", "M", "A"].includes(g)) freePassCount++;
-      else if (["D", "B"].includes(g)) penaltyCount++;
-      else if (["G", "X"].includes(g)) rejectCount++;
+      if (["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(g)) freePassCount++;
+      else if (g === "Non MBS") penaltyCount++;
+      else rejectCount++;
     });
 
     if (totalTrucks === 0 && activeLineHistory.length > 0) {
       activeLineHistory.forEach((item) => {
         const g = item.grade;
-        if (["S", "M", "A"].includes(g)) freePassCount++;
-        else if (["D", "B"].includes(g)) penaltyCount++;
-        else if (["G", "X"].includes(g)) rejectCount++;
+        if (["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(g)) freePassCount++;
+        else if (g === "Non MBS") penaltyCount++;
+        else rejectCount++;
       });
       const total = Math.max(1, activeLineHistory.length);
       return {
@@ -1012,19 +1012,19 @@ export function DashboardPage() {
 
                   {/* Ringkasan Rasio Mutu Eksekutif Meja Tebu Aktif */}
                   <div className="adminBarMetricsRow">
-                    <div className="adminMetricItem pass" title="Tebu mutu prima lolos tanpa rafaksi (MBS S, M, A)">
+                    <div className="adminMetricItem pass" title="Deteksi MBS, MBS Bintang, dan MBS Plus">
                       <span className="adminMetricDot green" />
-                      <span className="adminMetricLabel">Lolos Bebas (0%):</span>
+                      <span className="adminMetricLabel">Kelas MBS:</span>
                       <strong className="adminMetricVal">{execStats.freePassPct}%</strong>
                     </div>
-                    <div className="adminMetricItem penalty" title="Tebu terkena denda potongan bobot (MBS D, B)">
+                    <div className="adminMetricItem penalty" title="Deteksi kelas Non MBS">
                       <span className="adminMetricDot amber" />
-                      <span className="adminMetricLabel">Rafaksi:</span>
+                      <span className="adminMetricLabel">Non MBS:</span>
                       <strong className="adminMetricVal">{execStats.penaltyPct}%</strong>
                     </div>
-                    <div className="adminMetricItem reject" title="Tebu ditolak/afkir meja giling (MBS G, X)">
+                    <div className="adminMetricItem reject" title="Kelas lain yang memerlukan penilaian QC">
                       <span className="adminMetricDot red" />
-                      <span className="adminMetricLabel">Afkir/Tolak:</span>
+                      <span className="adminMetricLabel">Kelas lain:</span>
                       <strong className="adminMetricVal">{execStats.rejectPct}%</strong>
                     </div>
                   </div>
@@ -1167,13 +1167,13 @@ export function DashboardPage() {
                     type="button"
                     className="eventFeedRow"
                     onClick={() => setSelectedCapture(item)}
-                    title={`Klik untuk melihat detail Frame ${item.frameNumber} (Grade MBS ${item.grade})`}
+                    title={`Klik untuk melihat detail Frame ${item.frameNumber} (Grade ${item.grade})`}
                   >
                     <span className="eventFeedTime">
                       {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
                     <span className="eventFeedId">{item.frameNumber}</span>
-                    <span className={`eventFeedGrade ${gradeColor}`}>MBS {item.grade}</span>
+                    <span className={`eventFeedGrade ${gradeColor}`}>{item.grade}</span>
                     <span className="eventFeedConf">{confPercent}%</span>
                   </button>
                 );
@@ -1471,7 +1471,7 @@ export function DashboardPage() {
                     className="capturePhotoCard"
                     style={{ width: `min(100%, ${captureCardWidth}px)` }}
                     onClick={() => setSelectedCapture(item)}
-                    title={`Frame ${frameNumber(item.id)} — MBS ${item.grade}`}
+                    title={`Frame ${frameNumber(item.id)} — ${item.grade}`}
                   >
                     <div className="photoThumb">
                       {item.snapshot ? (
@@ -1489,7 +1489,7 @@ export function DashboardPage() {
                           <Camera size={22} />
                         </div>
                       )}
-                      <span className={`photoGradeBadge ${gradeColor}`}>MBS {item.grade}</span>
+                      <span className={`photoGradeBadge ${gradeColor}`}>{item.grade}</span>
                       {pendingInferenceIds.has(item.id) && (
                         <span style={{
                           position: "absolute",
@@ -1648,7 +1648,7 @@ export function DashboardPage() {
                       <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `DOMINAN (${effectiveInference.cycleFrameCount} FRAME)` : "PREDICTED GRADE"}</span>
                     </span>
                     <div className={`catGradeValue grade-${normalizeGrade(grade).toLowerCase()}`}>
-                      MBS {hasLatestInference ? normalizeGrade(grade) : "—"}
+                      {hasLatestInference ? normalizeGrade(grade) : "—"}
                     </div>
                     <span className="catGradeSub">
                       {hasLatestInference ? (KEBONAGUNG_GRADES.find(tg => tg.code === normalizeGrade(grade))?.decision || "—") : "Menunggu pemindaian AI..."}
@@ -1715,7 +1715,7 @@ export function DashboardPage() {
                     <strong className="cycleConsDominant">
                       {cycleConsistency && cycleConsistency.total > 0
                         ? cycleConsistency.dominantGrade
-                        : hasLatestInference ? `MBS ${normalizeGrade(grade)}` : "—"}
+                        : hasLatestInference ? `${normalizeGrade(grade)}` : "—"}
                     </strong>
                     <span>
                       {cycleConsistency && cycleConsistency.total > 0
@@ -1747,7 +1747,7 @@ export function DashboardPage() {
                   <div className="catKpi">
                     <span className="catKpiLabel">Rata-rata Mutu</span>
                     <strong className={`catKpiValue ${normalizeGrade(dailyCyclesStats?.overallGrade) === "X" || normalizeGrade(dailyCyclesStats?.overallGrade) === "G" ? "danger" : normalizeGrade(dailyCyclesStats?.overallGrade) === "B" || normalizeGrade(dailyCyclesStats?.overallGrade) === "D" ? "amber" : "blue"}`}>
-                      MBS {dailyCyclesStats ? normalizeGrade(dailyCyclesStats.overallGrade) : "—"}
+                      {dailyCyclesStats ? normalizeGrade(dailyCyclesStats.overallGrade) : "—"}
                     </strong>
                   </div>
                   <div className="catKpi">
@@ -1764,7 +1764,7 @@ export function DashboardPage() {
                   <div className="dailySummaryLeft">
                     <span className="dailySummaryLabel">STATUS MUTU HARIAN PABRIK</span>
                     <div className={`dailyGradeBadge grade-${normalizeGrade(dailyCyclesStats?.overallGrade).toLowerCase()}`}>
-                      MBS {dailyCyclesStats ? normalizeGrade(dailyCyclesStats.overallGrade) : "—"}
+                      {dailyCyclesStats ? normalizeGrade(dailyCyclesStats.overallGrade) : "—"}
                     </div>
                   </div>
                   <div className="dailySummaryRight">
@@ -1877,7 +1877,7 @@ export function DashboardPage() {
                         </div>
                         <div className="dailyCycleItemRight">
                           <span className={`dailyCycleGradeBadge grade-${item.grade.toLowerCase()}`}>
-                            MBS {item.grade}
+                            {item.grade}
                           </span>
                         </div>
                       </div>
@@ -1896,7 +1896,7 @@ export function DashboardPage() {
       {/* ─── Capture Detail Modal ─── */}
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
-        const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
+        const curConfig = gradeDefinition(capGrade);
         const confPercent = Math.round((selectedCapture.confidence ?? 0) * 100);
 
         const captureDate = new Date(selectedCapture.timestamp);
@@ -2027,7 +2027,7 @@ export function DashboardPage() {
                     <div className="hero-grade-main">
                       <div className="hero-grade-badge-wrap">
                         <span className={`hero-grade-pill ${curConfig.badgeCls}`}>
-                          MBS {capGrade}
+                          {capGrade}
                         </span>
                       </div>
                       <div className="hero-grade-titles">

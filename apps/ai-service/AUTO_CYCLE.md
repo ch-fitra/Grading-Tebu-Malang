@@ -12,7 +12,7 @@ Alur per kamera:
 2. Full frame harus terkonfirmasi terus-menerus selama **3 detik**. Prediksi tidak
    meyakinkan, kamera terputus, atau jeda frame lebih dari 1,5 detik mereset konfirmasi.
 3. Siklus grading menggunakan model aktif yang sudah ada
-   (`v0.0.1.sugarcane.keras` secara default), dengan pengaturan ROI grading sebelumnya.
+   (`model_sugarcane_malang.keras` secara default), dengan pengaturan ROI grading sebelumnya.
    Akuisisi dijadwalkan sekali per detik selama **30 detik**. Slot yang tertinggal
    dilewati; jumlah frame dapat berkurang jika inferensi lambat atau kamera terputus.
    Tidak ada inferensi grading baru setelah deadline; penyimpanan frame yang sedang

@@ -290,7 +290,7 @@ def measurement_result(classes: Dict[str, float], config: ModelConfig) -> Tuple[
     """Keep grade probabilities distinct from measured segmentation area."""
     if config.type == "classification":
         scores = {grade: round(float(value), 2) for grade, value in classes.items()
-                  if grade in ("S", "M", "A", "D", "B", "T", "G", "X")}
+                  if grade in config.classes}
         if not scores:
             raise HTTPException(status_code=422, detail="Model grading tidak menghasilkan kelas mutu yang dikenali")
         return scores, None, max(scores, key=scores.get), False
@@ -840,6 +840,7 @@ def infer(payload: InferRequest):
         "cycle_code": payload.cycle_code,
         "classes": mapped_scores,
         "detected_class": detected_class,
+        "detected_class_index": config.classes.index(detected_class) if config.type == "classification" else None,
         "grade": grade,
         "total_impurity": total_impurity,
         "impurity_measured": impurity_measured,

@@ -39,7 +39,7 @@ export function QualityGuidePage() {
         ))}
       </div>
       <footer className="workspaceFooter qualityFooter">
-        <span>Kelas T: keputusan giling dan rafaksi menunggu peninjauan QC secara manual.</span>
+        <span>11 kelas Malang, berurutan sesuai indeks model 0?10. Rafaksi ditentukan QC.</span>
         <span className="qualityDetailHint">Pilih kelas untuk melihat detail.</span>
       </footer>
       {selected && <div className="workspaceOverlay" onKeyDown={event => { if (event.key === "Escape") setSelected(null); }}><div className="workspaceDialog qualityDetailDialog" role="dialog" aria-modal="true" aria-labelledby="quality-detail-title">

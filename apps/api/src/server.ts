@@ -656,7 +656,7 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
       sampah: z.number().finite().min(0).max(100),
     }).safeParse(classes);
     if (!validatedClasses.success) return reply.code(502).send({ message: "Format keluaran kelas AI tidak valid" });
-    const gradeResult = z.enum(["S", "M", "A", "D", "B", "T", "G", "X"]).safeParse(
+    const gradeResult = z.enum(["ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar"]).safeParse(
       data.detected_class ?? data.grade ?? (data.impurity_measured ? calculateGrade(validatedClasses.data) : undefined)
     );
     if (!gradeResult.success) return reply.code(502).send({ message: "Kelas mutu keluaran AI tidak valid" });

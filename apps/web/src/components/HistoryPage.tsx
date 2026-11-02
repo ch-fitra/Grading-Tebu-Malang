@@ -31,7 +31,7 @@ import { TruckInspectionDetailModal } from "./TruckInspectionDetailModal";
 import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
-import { KEBONAGUNG_GRADES, normalizeGrade } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, gradeDefinition, normalizeGrade } from "../utils/grade-guide";
 import { aiApi, backendUrl } from "../utils/api";
 import type { TruckInspectionSession, InferenceResult } from "../types";
 
@@ -51,7 +51,7 @@ export function HistoryPage() {
     const start = new Date(row.startedAt).getTime();
     const end = row.completedAt ? new Date(row.completedAt).getTime() : Date.now();
     return dominantGrade(history.filter(item => ids.size ? ids.has(item.id) :
-      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000)) ?? "M";
+      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000)) ?? "";
   };
   const canWrite = useAppStore(s => s.session?.user.permissions?.includes("inspection.write") ?? false);
   const isAdmin = session?.user.role === "admin";
@@ -307,11 +307,11 @@ export function HistoryPage() {
     const body = filteredHistory.map((row) => {
       const station = resolveMbsStation(row.cameraId, cameras);
       const capGrade = normalizeGrade(row.grade);
-      const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
+      const curConfig = gradeDefinition(capGrade);
       return [
         new Date(row.timestamp).toLocaleString("id-ID"),
         `${station.label} (${station.subLabel})`,
-        `MBS ${capGrade}`,
+        `${capGrade}`,
         curConfig.name,
         curConfig.rafaksi,
         curConfig.status,
@@ -348,7 +348,7 @@ export function HistoryPage() {
         new Date(row.startedAt).toLocaleString("id-ID"),
         row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
         row.totalCaptures,
-        `MBS ${cycleGrade(row)}`,
+        `${cycleGrade(row)}`,
         `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
         KEBONAGUNG_GRADES.find(g => g.code === cycleGrade(row))?.decision ?? "Belum ditetapkan",
         row.status,
@@ -847,7 +847,7 @@ export function HistoryPage() {
                           </td>
                           <td>
                             <span className={`dailyCycleGradeBadge grade-${gradeCode.toLowerCase()}`}>
-                              MBS {gradeCode}
+                              {gradeCode}
                             </span>
                           </td>
                           <td>
@@ -936,7 +936,7 @@ export function HistoryPage() {
                   <tbody>
                     {pagedCaptures.map((row) => {
                       const g = normalizeGrade(row.grade);
-                      const curConfig = KEBONAGUNG_GRADES.find(item => item.code === g) || KEBONAGUNG_GRADES[1];
+                      const curConfig = gradeDefinition(g);
                       const confPct = Math.round((row.confidence ?? 0) * 100);
 
                       return (
@@ -978,7 +978,7 @@ export function HistoryPage() {
                           </td>
                           <td>
                             <span className={`dailyCycleGradeBadge grade-${g.toLowerCase()}`}>
-                              MBS {g}
+                              {g}
                             </span>
                           </td>
                           <td>
@@ -1056,7 +1056,7 @@ export function HistoryPage() {
       {/* ─── Single Capture Modal Preview ─── */}
       {selectedCapture && (() => {
         const capGrade = normalizeGrade(selectedCapture.grade);
-        const curConfig = KEBONAGUNG_GRADES.find(g => g.code === capGrade) || KEBONAGUNG_GRADES[1];
+        const curConfig = gradeDefinition(capGrade);
         const confPct = Math.round((selectedCapture.confidence ?? 0) * 100);
         const station = resolveMbsStation(selectedCapture.cameraId, cameras);
         const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", {
@@ -1195,7 +1195,7 @@ export function HistoryPage() {
                     <div className="hero-grade-main">
                       <div className="hero-grade-badge-wrap">
                         <span className={`hero-grade-pill ${curConfig.badgeCls}`}>
-                          MBS {capGrade}
+                          {capGrade}
                         </span>
                       </div>
                       <div className="hero-grade-titles">

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import logging
 import os
 import psycopg2
@@ -125,13 +127,15 @@ def run_ai_migrations():
                 ADD COLUMN IF NOT EXISTS cycle_code VARCHAR(50);
             """)
 
-            # Seed Default AI Model if empty (Keras model uploaded by user)
-            cursor.execute("""
-                INSERT INTO ai_models (model_code, model_name, version, model_path, is_active, config_json)
-                VALUES 
-                ('MDL_SUGARCANE_KERAS_V001', 'Sugarcane Quality Keras Model', '0.0.1', 'apps/ai-service/models/active/v0.0.1.sugarcane.keras', true, '{"classes": ["A", "B", "D", "G", "M", "T"], "threshold": 0.5}')
-                ON CONFLICT (model_code) DO NOTHING;
-            """)
+            cursor.execute("ALTER TABLE ai_results ALTER COLUMN majority_class TYPE VARCHAR(50)")
+            cursor.execute("ALTER TABLE ai_inference_results ALTER COLUMN detected_class TYPE VARCHAR(50)")
+            config = json.loads((Path(__file__).resolve().parents[1] / "models/active/config.json").read_text())
+            cursor.execute("UPDATE ai_models SET is_active=false WHERE is_active=true AND model_code <> 'MDL_MALANG_11'")
+            cursor.execute("""INSERT INTO ai_models(model_code,model_name,version,model_path,is_active,config_json)
+                VALUES('MDL_MALANG_11',%s,%s,%s,true,%s)
+                ON CONFLICT(model_code) DO UPDATE SET model_name=EXCLUDED.model_name,
+                version=EXCLUDED.version,model_path=EXCLUDED.model_path,is_active=true,config_json=EXCLUDED.config_json""",
+                (config['name'],config['version'],config['model_path'],json.dumps(config)))
 
         conn.commit()
         logger.info("Migrasi skema database 'sugarcane_ai' berhasil dijalankan.")

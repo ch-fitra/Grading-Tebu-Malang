@@ -15,7 +15,7 @@ import {
   HelpCircle
 } from "lucide-react";
 import type { TruckInspectionSession, InferenceResult } from "../types";
-import { KEBONAGUNG_GRADES, normalizeGrade, type KebonAgungGradeItem } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, gradeDefinition, normalizeGrade, type KebonAgungGradeItem } from "../utils/grade-guide";
 
 interface TruckInspectionDetailModalProps {
   session: TruckInspectionSession;
@@ -92,8 +92,8 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
   };
 
   // Evaluasi kelas mutu akhir sesi truk
-  const finalGradeCode = dominantGrade(sessionCaptures) ?? "M";
-  const curGradeConfig: KebonAgungGradeItem = KEBONAGUNG_GRADES.find(g => g.code === finalGradeCode) || KEBONAGUNG_GRADES[1];
+  const finalGradeCode = dominantGrade(sessionCaptures) ?? "";
+  const curGradeConfig: KebonAgungGradeItem = gradeDefinition(finalGradeCode);
   const station = resolveMbsStation(session.line, cameras);
   const mbsInfo = { ...station, factory: "PG Kebon Agung (Malang)", full: `${station.label} - Meja Tebu ${station.mbsNum} (PG Kebon Agung)` };
 
@@ -164,7 +164,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
               <div className="truck-hero-grade-main">
                 <div className="truck-grade-badge-wrap">
                   <span className={`truck-grade-pill ${curGradeConfig.badgeCls}`}>
-                    MBS {curGradeConfig.code}
+                    {curGradeConfig.code}
                   </span>
                 </div>
                 <div className="truck-grade-info">
@@ -298,7 +298,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                   <div className="cycle-grade-select-wrap">
                     <button type="button" className="gradePickerTrigger" aria-haspopup="listbox" aria-expanded={gradePickerOpen}
                       aria-label="Filter mutu frame" onClick={() => setGradePickerOpen(open => !open)}>
-                      <span>{selectedGradeFilter === "all" ? "Semua Mutu" : `MBS ${selectedGradeFilter}`}</span>
+                      <span>{selectedGradeFilter === "all" ? "Semua Mutu" : `${selectedGradeFilter}`}</span>
                       <span className="gradePickerCount">{filteredCaptures.length} frame</span>
                       <ChevronDown size={13} />
                     </button>
@@ -348,7 +348,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
             ) : filteredCaptures.length === 0 ? (
               <div className="truck-empty-cycles-box">
                 <Filter size={32} />
-                <p>Tidak ada frame dengan filter mutu MBS {selectedGradeFilter}.</p>
+                <p>Tidak ada frame dengan filter mutu {selectedGradeFilter}.</p>
                 <button
                   type="button"
                   className="truck-filter-reset-action"
@@ -377,7 +377,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                       {visibleCaptures.map((item) => {
                         const cycleNumber = sortedCaptures.findIndex(frame => frame.id === item.id) + 1;
                         const normGrade = normalizeGrade(item.grade);
-                        const rowGradeDef = KEBONAGUNG_GRADES.find(g => g.code === normGrade) || KEBONAGUNG_GRADES[1];
+                        const rowGradeDef = gradeDefinition(normGrade);
 
                         return (
                           <tr key={item.id} className="truck-cycle-row">
@@ -393,7 +393,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                             </td>
                             <td>
                               <span className={`table-grade-badge ${rowGradeDef.badgeCls}`}>
-                                MBS {normGrade}
+                                {normGrade}
                               </span>
                             </td>
                             <td>

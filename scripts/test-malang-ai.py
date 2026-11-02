@@ -24,7 +24,7 @@ with get_ai_db_connection() as connection:
         cursor.execute("SELECT roi_config FROM ai_cameras WHERE id=%s", (camera_id,))
         roi = cursor.fetchone()[0]
 assert roi["camera_id"] == camera_id
-assert (roi["x"], roi["y"], roi["width"], roi["height"]) == (0.58, 0.08, 0.39, 0.62)
+assert (roi["x"], roi["y"], roi["width"], roi["height"]) == (0.49, 0.14, 0.32, 0.72)
 print("PASS: station 2 ROI mapped to actual camera ID", camera_id)
 
 # Check sync never overwrites an operator calibration.
@@ -56,7 +56,27 @@ assert b"database khusus Malang" in result.stderr
 print("PASS: Python rejects Trangkil database")
 
 import main
-for config, expected in [(main.load_config(), {"A", "B", "D", "G", "M", "T"}),
+expected_classes = ["ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar"]
+config = main.load_config()
+assert config.classes == expected_classes
+for index, label in enumerate(expected_classes):
+    logits = np.full((1, 11), -20.0)
+    logits[0, index] = 20.0
+    scores, confidence = main.classification_measurement(logits, config)
+    mapped, total, detected, measured = main.measurement_result(scores, config)
+    assert list(mapped) == expected_classes
+    assert detected == label and config.classes.index(detected) == index
+    assert confidence > 0.99 and total is None and measured is False
+print("PASS: every official class index 0-10 maps correctly without legacy conversion")
+with get_ai_db_connection() as connection:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO ai_inference_results(detected_class,classes_score) VALUES(%s,%s)", ("Sogolan Pucuk", json.dumps({"Sogolan Pucuk": 100})))
+            cursor.execute("INSERT INTO ai_results(cycle_code,majority_class) VALUES(%s,%s)", ("test-malang-label-width", "Sogolan Pucuk"))
+    finally:
+        connection.rollback()
+print("PASS: longest class label persists in frame and cycle tables (rolled back)")
+for config, expected in [(main.load_config(), set(main.load_config().classes)),
                          (main.load_frame_config(), {"full_frame_sugarcane", "not_full_frame"})]:
     scores, confidence = main.run_onnx_inference(np.zeros((360, 640, 3), dtype=np.uint8), config)
     assert set(scores) == expected

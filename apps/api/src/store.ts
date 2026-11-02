@@ -40,14 +40,14 @@ async function withDetectedClasses(rows: InferenceResult[]): Promise<InferenceRe
   const byPath = new Map(result.rows.map(r => [r.snapshot_path, r]));
   return rows.map(row => {
     const detection = byPath.get(row.snapshot?.replace(/^\/+/, ""));
-    return detection && ["S", "M", "A", "D", "B", "T", "G", "X"].includes(detection.detected_class)
+    return detection && ["ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar", "S", "M", "A", "D", "B", "T", "G", "X"].includes(detection.detected_class)
       ? { ...row, grade: detection.detected_class as Grade, classScores: Object.keys(detection.classes_score ?? {}).some(code => ["daun", "pucuk", "sampah"].includes(code)) ? undefined : detection.classes_score }
       : row;
   });
 }
 
 export const DEFAULT_MODELS: Omit<AiModel, "createdAt">[] = [
-  { id: 1, name: "Sugarcane Quality Keras Model", version: "0.0.1", path: "apps/ai-service/models/active/v0.0.1.sugarcane.keras", active: true }
+  { id: 1, name: "Sugarcane Malang 11 Classes", version: "malang-1", path: "apps/ai-service/models/active/model_sugarcane_malang.keras", active: true }
 ];
 
 export const store = {

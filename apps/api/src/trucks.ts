@@ -40,7 +40,7 @@ async function read(id?: string, db: Queryable = pool): Promise<TruckRecord[]> {
     const votes = new Map<string, number>();
     for (const grade of r.detected_grades as string[]) votes.set(grade, (votes.get(grade) ?? 0) + 1);
     const grade = [...votes].sort((a, b) => b[1] - a[1])[0]?.[0];
-    const decision = ["S", "M", "A"].includes(grade ?? "") ? "MBS" : ["D", "B"].includes(grade ?? "") ? "NON_MBS" : ["G", "X"].includes(grade ?? "") ? "DITOLAK_DO" : "PENDING";
+    const decision = ["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(grade ?? "") ? "MBS" : ["Non MBS", "D", "B"].includes(grade ?? "") ? "NON_MBS" : ["G", "X"].includes(grade ?? "") ? "DITOLAK_DO" : "PENDING";
     return {
       id: String(r.id), truckCode: String(r.truck_code), plateNumber: String(r.plate_number ?? ""),
       driverName: String(r.driver_name ?? ""), supplier: String(r.supplier ?? ""), line: Number(r.line),
