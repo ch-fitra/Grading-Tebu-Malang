@@ -7,5 +7,6 @@
   "threshold": 0.8,
   "output_activation": "softmax",
   "input_color": "rgb",
-  "model_path": "models/active/model_frame_sugarcane.keras"
+  "model_path": "models/active/model_frame_sugarcane_malang.keras",
+  "frame_input": "embedded_roi"
 }

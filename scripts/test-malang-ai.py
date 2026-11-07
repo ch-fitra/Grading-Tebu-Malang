@@ -35,6 +35,17 @@ try:
     assert AIRepository.get_camera_roi(camera_id)["x"] == 0.57
     AIRepository.register_camera(camera_id, camera_rtsp, camera_name)
     assert AIRepository.get_camera_roi(camera_id)["x"] == 0.57
+    # Upgrade a legacy calibrated rectangle without resetting its coordinates.
+    legacy = {key: value for key, value in custom.items() if key != "incoming"}
+    assert AIRepository.update_camera_roi(camera_id, legacy)
+    AIRepository.sync_application_cameras()
+    upgraded = AIRepository.get_camera_roi(camera_id)
+    assert upgraded["x"] == 0.57
+    assert upgraded["incoming"]["points"][0] == {"x": 0.106, "y": 0.052}
+    # Explicitly removing the incoming region must survive synchronization.
+    assert AIRepository.update_camera_roi(camera_id, {**custom, "incoming": None})
+    AIRepository.sync_application_cameras()
+    assert AIRepository.get_camera_roi(camera_id)["incoming"] is None
 finally:
     AIRepository.update_camera_roi(camera_id, roi)
 print("PASS: calibrated ROI survives camera synchronization")

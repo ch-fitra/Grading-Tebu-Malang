@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 from streamer import (
     DEFAULT_ROIS,
     ROIModel,
+    crop_incoming_roi,
     load_all_rois,
     invalidate_rois,
     save_roi,
@@ -159,6 +160,7 @@ class ModelConfig(BaseModel):
     output_activation: Literal["probabilities", "sigmoid", "softmax"] = "probabilities"
     input_color: Literal["rgb", "bgr"] = "rgb"
     model_path: str = "models/active/model.onnx"
+    frame_input: Literal["incoming_roi", "embedded_roi"] = "incoming_roi"
 
 
 class CameraRegisterPayload(BaseModel):
@@ -405,6 +407,7 @@ def snapshot(
     camera_id: int,
     overlay: bool = Query(True, description="Render ROI HUD"),
     crop_roi: bool = Query(False, description="Crop frame to ROI"),
+    roi_target: Literal["grading", "incoming"] = Query("grading", description="Area ROI untuk snapshot crop"),
     target_width: int = Query(1280, ge=1, le=4096, description="Target width"),
     quality: int = Query(85, ge=1, le=100, description="JPEG quality"),
 ):
@@ -412,10 +415,13 @@ def snapshot(
     if not stream:
         raise HTTPException(status_code=404, detail=f"Camera stream #{camera_id} not found")
 
-    if crop_roi:
+    if crop_roi or roi_target == "incoming":
         all_rois = load_all_rois()
         roi = all_rois.get(camera_id)
-        frame = stream.get_roi_crop(roi)
+        try:
+            frame = stream.get_roi_crop(roi, target=roi_target)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if frame is None:
             raise HTTPException(status_code=503, detail="Camera frame not available")
         _, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
@@ -439,6 +445,11 @@ def get_roi(camera_id: int):
 @app.post("/roi/{camera_id}")
 def update_roi(camera_id: int, payload: ROIModel):
     payload.camera_id = camera_id
+    # Older clients only know the grading rectangle. Keep the incoming region
+    # unless the caller explicitly provides it (null removes it).
+    existing = load_all_rois().get(camera_id)
+    if "incoming" not in payload.model_fields_set and existing:
+        payload.incoming = existing.incoming
     save_roi(payload)
     return {"status": "ok", "roi": payload}
 
@@ -547,6 +558,24 @@ def history_page(
     return AIRepository.history_page(camera_id, page, page_size, cycle_code)
 
 
+def _frame_detection_image(camera_id, image, config=None):
+    config = config or load_frame_config()
+    # Models with a built-in spatial crop must see the original full frame.
+    if config.frame_input == "embedded_roi":
+        return image
+    roi = load_all_rois().get(camera_id)
+    if roi and roi.incoming and roi.incoming.enabled:
+        return crop_incoming_roi(image, roi.incoming)
+    return image
+
+
+def _detection_region(camera_id):
+    if load_frame_config().frame_input == "embedded_roi":
+        return "incoming"
+    roi = load_all_rois().get(camera_id)
+    return "incoming" if roi and roi.incoming and roi.incoming.enabled else "full_frame"
+
+
 def _sample_full_frame(camera_id, previous_id):
     stream = stream_manager.get_stream(camera_id)
     if not stream or not stream.is_connected:
@@ -558,7 +587,7 @@ def _sample_full_frame(camera_id, previous_id):
             return frame_id, None, None
         image = stream.latest_raw_frame.copy()
     config = load_frame_config()
-    classes, confidence = run_onnx_inference(image, config)
+    classes, confidence = run_onnx_inference(_frame_detection_image(camera_id, image, config), config)
     if not np.isfinite(list(classes.values())).all():
         raise RuntimeError("Output model full frame tidak valid")
     if confidence < config.threshold:
@@ -599,7 +628,8 @@ def _auto_controller(camera_id):
 @app.get("/cycle/auto/{camera_id}")
 def get_auto_mode(camera_id: int, authorization: Optional[str] = Header(None)):
     _authorize_auto(camera_id, authorization)
-    return {**_auto_controller(camera_id).status(), "model_available": configured_model_path(load_frame_config()).is_file()}
+    return {**_auto_controller(camera_id).status(), "model_available": configured_model_path(load_frame_config()).is_file(),
+            "detection_region": _detection_region(camera_id)}
 
 
 @app.put("/cycle/auto/{camera_id}")
@@ -615,9 +645,10 @@ def set_auto_mode(camera_id: int, payload: AutoModeRequest, authorization: Optio
             if image is None:
                 raise HTTPException(status_code=503, detail="Kamera belum terhubung")
             # Warm both models before the confirmation/capture clocks start.
-            run_onnx_inference(image, load_frame_config())
+            run_onnx_inference(_frame_detection_image(camera_id, image), load_frame_config())
             run_onnx_inference(image, load_config())
-        return {**controller.set_enabled(payload.enabled), "model_available": True}
+        return {**controller.set_enabled(payload.enabled), "model_available": True,
+                "detection_region": _detection_region(camera_id)}
 
 
 def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event, deadline: Optional[float] = None):

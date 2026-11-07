@@ -1,4 +1,4 @@
-"""Server-owned automatic cycles; no browser timers or ROI are involved."""
+"""Server-owned automatic cycles, using observations from the configured detection area."""
 from __future__ import annotations
 
 import math

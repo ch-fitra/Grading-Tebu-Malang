@@ -7,5 +7,15 @@
   "enabled": true,
   "show_grid": true,
   "show_scrim": true,
-  "show_telemetry": true
+  "show_telemetry": true,
+  "incoming": {
+    "enabled": true,
+    "label": "ROI: TEBU MASUK",
+    "points": [
+      { "x": 0.106, "y": 0.052 },
+      { "x": 0.348, "y": 0.052 },
+      { "x": 0.333, "y": 0.407 },
+      { "x": 0.171, "y": 0.407 }
+    ]
+  }
 }

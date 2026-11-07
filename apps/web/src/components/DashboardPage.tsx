@@ -14,6 +14,7 @@ type AutoCycleStatus = {
   camera_id: number;
   enabled: boolean;
   model_available: boolean;
+  detection_region?: "incoming" | "full_frame";
   phase: "off" | "waiting_full" | "confirming" | "starting" | "grading" | "finishing" | "waiting_clear" | "camera_unavailable" | "uncertain" | "error";
   confirmed_seconds: number;
   confirmation_seconds: number;
@@ -1039,7 +1040,7 @@ export function DashboardPage() {
                       <button type="button" className="cycleAutoButton" aria-pressed={autoEnabled}
                         disabled={!canInspect || !targetCameraId || !currentAutoMode || autoModeBusy || (!autoEnabled && (!currentAutoMode.model_available || Boolean(activeCycle)))}
                         onClick={handleToggleAuto}
-                        title={autoEnabled ? "Matikan Auto dan simpan siklus yang sedang berjalan" : "Aktifkan pemindaian otomatis saat tebu memenuhi seluruh frame"}>
+                        title={autoEnabled ? "Matikan Auto dan simpan siklus yang sedang berjalan" : currentAutoMode?.detection_region === "incoming" ? "Aktifkan grading otomatis saat tebu memenuhi ROI masuk selama 3 detik" : "Aktifkan pemindaian otomatis saat tebu memenuhi seluruh frame"}>
                         {autoModeBusy ? "Memproses..." : autoEnabled ? "Auto Aktif" : "Aktifkan Auto"}
                         <span className="cycleAutoSwitch" aria-hidden="true" />
                       </button>

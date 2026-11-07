@@ -45,6 +45,12 @@ class AIRepository:
                             (roi_config->>'x'='0.58' AND roi_config->>'y'='0.08'
                              AND roi_config->>'width'='0.39' AND roi_config->>'height'='0.62'))""",
                                        (json.dumps(template), camera["id"]))
+                        # Add the new region without replacing grading calibration
+                        # or an operator's explicit incoming=null/disabled setting.
+                        cursor.execute("""UPDATE ai_cameras
+                            SET roi_config=jsonb_set(roi_config, '{incoming}', %s::jsonb), updated_at=NOW()
+                            WHERE id=%s AND roi_config IS NOT NULL AND NOT (roi_config ? 'incoming')""",
+                                       (json.dumps(template["incoming"]), camera["id"]))
 
     @staticmethod
     def history_summary(camera_ids: List[int], start_at=None, end_at=None, search: str = "") -> Dict[str, Any]:

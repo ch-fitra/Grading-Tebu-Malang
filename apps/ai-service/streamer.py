@@ -33,6 +33,40 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
 )
 
 
+class ROIPoint(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class IncomingROI(BaseModel):
+    enabled: bool = True
+    label: str = "ROI: TEBU MASUK"
+    points: list[ROIPoint] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def validate_polygon(self):
+        # Require an ordered convex quadrilateral, rejecting crossed/flat edges.
+        points = np.array([(p.x, p.y) for p in self.points], dtype=np.float32)
+        if not cv2.isContourConvex(points) or cv2.contourArea(points) < 0.0001:
+            raise ValueError("ROI masuk harus berupa segi empat cembung yang tidak bersilangan")
+        return self
+
+    def pixels(self, width: int, height: int) -> np.ndarray:
+        return np.array([(round(p.x * (width - 1)), round(p.y * (height - 1)))
+                         for p in self.points], dtype=np.int32)
+
+
+def crop_incoming_roi(frame: np.ndarray, roi: IncomingROI) -> np.ndarray:
+    """Crop raw pixels, masking everything outside the incoming polygon."""
+    h, w = frame.shape[:2]
+    points = roi.pixels(w, h)
+    x, y, width, height = cv2.boundingRect(points)
+    crop = frame[y:y + height, x:x + width].copy()
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, points - (x, y), 255)
+    return cv2.bitwise_and(crop, crop, mask=mask)
+
+
 class ROIModel(BaseModel):
     camera_id: int = Field(gt=0)
     enabled: bool = True
@@ -44,6 +78,7 @@ class ROIModel(BaseModel):
     show_grid: bool = True
     show_telemetry: bool = True
     show_scrim: bool = True
+    incoming: Optional[IncomingROI] = None
 
     @model_validator(mode="after")
     def validate_bounds(self):
@@ -285,6 +320,10 @@ class CameraStream:
                 if roi.show_scrim:
                     scrim = cv2.convertScaleAbs(frame, alpha=0.42, beta=0)
                     scrim[y1:y2, x1:x2] = frame[y1:y2, x1:x2]
+                    if roi.incoming and roi.incoming.enabled:
+                        mask = np.zeros((h, w), dtype=np.uint8)
+                        cv2.fillConvexPoly(mask, roi.incoming.pixels(w, h), 255)
+                        cv2.copyTo(frame, mask, scrim)
                     frame = scrim
 
                 color_primary = (0, 230, 118)  # Emerald green (BGR)
@@ -322,6 +361,13 @@ class CameraStream:
                 cv2.rectangle(frame, (x1, badge_y - th - 6), (x1 + tw + 12, badge_y + 4), (15, 23, 42), -1)
                 cv2.rectangle(frame, (x1, badge_y - th - 6), (x1 + tw + 12, badge_y + 4), color_primary, 1)
                 cv2.putText(frame, label_text, (x1 + 6, badge_y - 2), font, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+
+            if roi and roi.incoming and roi.incoming.enabled:
+                points = roi.incoming.pixels(w, h)
+                cv2.polylines(frame, [points], True, (255, 255, 255), 2, cv2.LINE_AA)
+                left, top = points.min(axis=0)
+                cv2.putText(frame, roi.incoming.label, (int(left) + 6, int(top) + 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
 
             # Top Telemetry Bar (<0.1ms)
             if roi and roi.show_telemetry:
@@ -560,11 +606,15 @@ class CameraStream:
             self.fps = 0.0
         return None
 
-    def get_roi_crop(self, roi: Optional[ROIModel] = None) -> Optional[np.ndarray]:
+    def get_roi_crop(self, roi: Optional[ROIModel] = None, target: str = "grading") -> Optional[np.ndarray]:
         """Crops the sugarcane ROI directly from the full-resolution raw frame."""
         frame = self.get_raw_frame()
         if frame is None:
             return None
+        if target == "incoming":
+            if roi is None or roi.incoming is None or not roi.incoming.enabled:
+                raise ValueError("ROI tebu masuk belum dikonfigurasi atau dinonaktifkan")
+            return crop_incoming_roi(frame, roi.incoming)
         if roi is None or not roi.enabled:
             return frame
 
