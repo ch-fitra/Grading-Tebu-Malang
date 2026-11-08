@@ -16974,3 +16974,88 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
   min-height: 26px;
   min-width: 0;
 }
+
+/* Let analysis content keep its natural height and scroll within the panel.
+   Shrinking the list while its rows overflow makes the consistency card overlap. */
+.dashboardPage.newLayout .categoryAnalysisCard {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.dashboardPage.newLayout .catAnalysisHeader,
+.dashboardPage.newLayout .catModeSwitchPills {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.dashboardPage.newLayout .realtimeAggregateArea,
+.dashboardPage.newLayout .dailyAggregateScrollArea {
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.dashboardPage.newLayout .realtimeAggregateArea > *,
+.dashboardPage.newLayout .dailyAggregateScrollArea > * {
+  flex-shrink: 0;
+}
+.dashboardPage.newLayout .catGradeProbList {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  overflow: visible !important;
+}
+.dashboardPage.newLayout .catGradeProbRow {
+  flex: 0 0 auto;
+  min-height: 30px;
+  box-sizing: border-box;
+}
+.dashboardPage.newLayout .cycleConsistencyCard {
+  margin-top: 0;
+}
+.dashboardPage.newLayout .catProbHeader,
+.dashboardPage.newLayout .cycleConsHeader,
+.dashboardPage.newLayout .cycleConsSummary {
+  flex-wrap: wrap;
+}
+.dashboardPage.newLayout .catProbLeft {
+  flex: 1 1 auto;
+}
+.dashboardPage.newLayout .catProbCode {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.dashboardPage.newLayout .catProbValueGroup {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.dashboardPage.newLayout .catMetricsTitle,
+.dashboardPage.newLayout .cycleConsTitle {
+  max-width: 100%;
+  white-space: normal;
+  box-sizing: border-box;
+}
+.dashboardPage.newLayout .catMetricsTitle > span {
+  min-width: 0;
+  white-space: normal;
+}
+.dashboardPage.newLayout .cycleConsMiniBars {
+  grid-template-columns: repeat(auto-fit, minmax(38px, 1fr));
+}
+.dashboardPage.newLayout .eventFeedGrade {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+}
+.dashboardPage.newLayout[data-short="true"] .catGradeProbList {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: none;
+  grid-auto-rows: auto;
+  height: auto;
+  min-height: 0;
+}
