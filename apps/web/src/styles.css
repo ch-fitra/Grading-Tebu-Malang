@@ -8308,13 +8308,6 @@ main.dashboardMainFixed {
   gap: 6px;
 }
 
-.catDistributionNote {
-  margin: 5px 0;
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--color-muted);
-}
-
 .catProbCountBadge {
   font-size: 8.5px;
   color: var(--color-muted);

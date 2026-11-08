@@ -1663,7 +1663,6 @@ export function DashboardPage() {
                   <TrendingUp size={11} />
                   <span>Distribusi Kelas Berdasarkan Frame</span>
                 </div>
-                <p className="catDistributionNote">Jumlah label prediksi per kelas, bukan keyakinan model. Total: {distributionFrames.length} frame.</p>
                 <div className="catGradeProbList">
                   {gradeDistribution.map((item) => (
                     <div
