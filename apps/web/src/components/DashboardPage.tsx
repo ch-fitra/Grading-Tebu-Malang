@@ -1658,12 +1658,6 @@ export function DashboardPage() {
                 {/* Divider */}
                 <div className="catDivider" />
 
-                {hasLatestInference && gradeConf < 0.5 && (
-                  <p className="catConfidenceWarning" role="status">
-                    Keyakinan model di bawah 50%. Label masih berupa prediksi lemah dan perlu validasi QC.
-                  </p>
-                )}
-
                 {/* Distribution of selected frame labels, not model probabilities. */}
                 <div className="catMetricsTitle">
                   <TrendingUp size={11} />
