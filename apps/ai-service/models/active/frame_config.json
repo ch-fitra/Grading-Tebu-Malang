@@ -4,9 +4,8 @@
   "type": "classification",
   "input_size": 224,
   "classes": ["full_frame_sugarcane", "not_full_frame"],
-  "threshold": 0.8,
+  "threshold": 0.80,
   "output_activation": "softmax",
   "input_color": "rgb",
-  "model_path": "models/active/model_frame_sugarcane_malang.keras",
-  "frame_input": "embedded_roi"
+  "model_path": "models/active/model_frame_sugarcane.keras"
 }

@@ -1,0 +1,33 @@
+{
+  "x": 0.4375,
+  "y": 0.05,
+  "label": "ROI: MEJA TEBU 2 (PG KEBON AGUNG)",
+  "width": 0.32,
+  "height": 0.72,
+  "enabled": true,
+  "show_grid": true,
+  "show_scrim": true,
+  "show_telemetry": true,
+  "incoming": {
+    "enabled": true,
+    "label": "ROI: TEBU MASUK",
+    "points": [
+      {
+        "x": 0.346,
+        "y": 0.049
+      },
+      {
+        "x": 0.39,
+        "y": 0.049
+      },
+      {
+        "x": 0.387,
+        "y": 0.407
+      },
+      {
+        "x": 0.332,
+        "y": 0.407
+      }
+    ]
+  }
+}

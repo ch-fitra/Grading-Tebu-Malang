@@ -24,7 +24,7 @@ with get_ai_db_connection() as connection:
         cursor.execute("SELECT roi_config FROM ai_cameras WHERE id=%s", (camera_id,))
         roi = cursor.fetchone()[0]
 assert roi["camera_id"] == camera_id
-assert (roi["x"], roi["y"], roi["width"], roi["height"]) == (0.49, 0.14, 0.32, 0.72)
+assert (roi["x"], roi["y"], roi["width"], roi["height"]) == (0.4375, 0.05, 0.32, 0.72)
 print("PASS: station 2 ROI mapped to actual camera ID", camera_id)
 
 # Check sync never overwrites an operator calibration.

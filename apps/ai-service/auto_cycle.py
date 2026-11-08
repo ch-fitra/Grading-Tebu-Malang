@@ -43,7 +43,7 @@ class FrameGate:
 
 
 class AutoCycleController:
-    def __init__(self, camera_id, sample, start, finish, duration=30.0, clock=time.monotonic):
+    def __init__(self, camera_id, sample, start, finish, duration=50.0, clock=time.monotonic):
         self.camera_id = camera_id
         self.sample = sample
         self.start_cycle = start

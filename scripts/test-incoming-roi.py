@@ -24,10 +24,11 @@ class IncomingROITest(unittest.TestCase):
             frame = np.full((height, width, 3), 180, np.uint8)
             crop = crop_incoming_roi(frame, self.roi.incoming)
             self.assertGreater(crop.shape[0], height * .35)
-            self.assertGreater(crop.shape[1], width * .24)
+            self.assertGreater(crop.shape[1], width * .05)
+            self.assertLess(crop.shape[1], width * .065)
             self.assertTrue(np.all(crop[crop.shape[0] // 2, crop.shape[1] // 2] == 180))
-            # The bottom left corner is outside the tapered polygon.
-            self.assertTrue(np.all(crop[-1, 0] == 0))
+            # The top left corner is outside the slightly slanted white polygon.
+            self.assertTrue(np.all(crop[0, 0] == 0))
             self.assertTrue(np.all(frame == 180))
 
     def test_reject_invalid_polygons(self):
@@ -46,12 +47,12 @@ class IncomingROITest(unittest.TestCase):
         with patch("streamer.load_all_rois", return_value={8: self.roi}):
             jpeg = stream._render_and_encode(frame, overlay=True, target_width=1280, quality=95)
         rendered = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
-        self.assertGreater(rendered[150, 280].mean(), 170)  # Incoming interior
+        self.assertGreater(rendered[150, 465].mean(), 170)  # Incoming interior
         self.assertGreater(rendered[170, 700].mean(), 170)  # Grading interior
         self.assertLess(rendered[400, 1150].mean(), 90)  # Scrim outside both
         self.assertTrue(np.all(frame == 180))
         with patch.object(stream, "get_raw_frame", return_value=frame):
-            np.testing.assert_array_equal(stream.get_roi_crop(self.roi), frame[100:619, 627:1036])
+            np.testing.assert_array_equal(stream.get_roi_crop(self.roi), frame[36:554, 560:969])
             self.assertLess(stream.get_roi_crop(self.roi, target="incoming").shape[1], 320)
             with self.assertRaises(ValueError):
                 stream.get_roi_crop(ROIModel(camera_id=8), target="incoming")
@@ -95,7 +96,7 @@ class IncomingROITest(unittest.TestCase):
             np.testing.assert_array_equal(image, expected)
             return {"full_frame_sugarcane": 99 if occupied[0] else 1,
                     "not_full_frame": 1 if occupied[0] else 99}, .99
-        start = Mock(side_effect=lambda: ("test-cycle", now[0] + 30))
+        start = Mock(side_effect=lambda: ("test-cycle", now[0] + 50))
         finish = Mock()
         controller = AutoCycleController(8, lambda previous: main._sample_full_frame(8, previous),
                                          start, finish, clock=lambda: now[0])
@@ -111,23 +112,27 @@ class IncomingROITest(unittest.TestCase):
                 controller.tick()
             self.assertEqual(start.call_count, 1)
             self.assertEqual(controller.phase, "grading")
+            self.assertEqual(controller.status()["grading_seconds"], 50)
             now[0] = 33.0
             controller.tick()
+            finish.assert_not_called()
+            now[0] = 53.0
+            controller.tick()
             finish.assert_called_once_with("test-cycle")
-            for second in range(34, 38):
+            for second in range(54, 58):
                 now[0] = float(second)
                 stream.raw_frame_id += 1
                 stream.last_frame_time = time.time()
                 controller.tick()
             self.assertEqual(start.call_count, 1)  # Same load cannot retrigger.
             occupied[0] = False
-            for second in range(38, 42):
+            for second in range(58, 62):
                 now[0] = float(second)
                 stream.raw_frame_id += 1
                 stream.last_frame_time = time.time()
                 controller.tick()
             occupied[0] = True
-            for second in range(42, 46):
+            for second in range(62, 66):
                 now[0] = float(second)
                 stream.raw_frame_id += 1
                 stream.last_frame_time = time.time()

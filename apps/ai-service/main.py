@@ -602,7 +602,7 @@ def _start_automatic_cycle(camera_id):
         code = str(uuid4())
         AIRepository.create_auto_inspection(camera_id, code)
         try:
-            result, deadline = _begin_cycle(StartCycleRequest(camera_id=camera_id, cycle_code=code), duration=30.0, warm=False)
+            result, deadline = _begin_cycle(StartCycleRequest(camera_id=camera_id, cycle_code=code), duration=50.0, warm=False)
         except Exception:
             AIRepository.discard_auto_inspection(code)
             raise
