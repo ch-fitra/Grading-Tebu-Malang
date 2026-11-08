@@ -1,5 +1,5 @@
 import { usePanelSize } from "../hooks/usePanelSize";
-import { frameNumbers, dominantGrade, meanClassScores } from "../utils/grade-data";
+import { frameNumbers, dominantGrade, meanClassScores, frameGradeDistribution, storedClassProbability } from "../utils/grade-data";
 import { findStationCamera } from "../utils/stations";
 import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -563,6 +563,7 @@ export function DashboardPage() {
   // 2. If a specific cycle is filtered: AVERAGE ALL FRAMES belonging to that cycle!
   // 3. When scanning has stopped, retain the aggregate for the selected camera/filter.
   const effectiveInference = useMemo(() => {
+    if (activeCycle && activeCycleFrames.length === 0) return null;
     if (activeCycle && activeCycleFrames.length > 0) {
       const count = activeCycleFrames.length;
       const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
@@ -594,7 +595,7 @@ export function DashboardPage() {
       };
     }
 
-    return latest;
+    return latest?.cameraId === targetCameraId ? latest : null;
   }, [activeCycle, activeCycleFrames, selectedCycle, cycleModelFrames, latest, targetCameraId]);
 
   const cycleGrade = (cycle: typeof lineCycles[number]): Grade => {
@@ -686,29 +687,26 @@ export function DashboardPage() {
   const grade = effectiveInference?.grade;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
 
-  // Model scores are persisted percentages; no invented neighbouring probabilities.
-  const gradeDistribution = useMemo(() => KEBONAGUNG_GRADES.map(item => ({
-    ...item,
-    prob: hasLatestInference ? Math.round(effectiveInference?.classScores?.[item.code] ??
-      (item.code === grade ? gradeConf * 100 : 0)) : 0
-  })), [effectiveInference, grade, gradeConf, hasLatestInference]);
+  const distributionFrames = activeCycle ? activeCycleFrames : cycleModelFrames;
+  const gradeDistribution = frameGradeDistribution(distributionFrames, KEBONAGUNG_GRADES.map(item => item.code))
+    .map((result, index) => ({ ...KEBONAGUNG_GRADES[index], ...result }));
 
   // Statistik Konsistensi Siklus Meja Tebu (11 Kelas Malang)
   const cycleConsistency = useMemo(() => {
-    if (!cycleModelFrames || cycleModelFrames.length === 0) return null;
-    const total = cycleModelFrames.length;
+    if (distributionFrames.length === 0) return null;
+    const total = distributionFrames.length;
     const counts = KEBONAGUNG_GRADES.map(tg => ({
       code: tg.label,
       rawCode: tg.code,
       color: tg.color,
-      count: cycleModelFrames.filter(c => normalizeGrade(c.grade) === tg.code).length
+      count: distributionFrames.filter(c => normalizeGrade(c.grade) === tg.code).length
     }));
 
     const dominant = counts.reduce((max, cur) => cur.count > max.count ? cur : max, counts[0]);
     const dominantPct = Math.round((dominant.count / total) * 100);
 
     return { total, counts, dominantGrade: dominant.code, dominantPct };
-  }, [cycleModelFrames]);
+  }, [distributionFrames]);
 
   // Metrik Tata Kelola Eksekutif Direksi (KPI Agregat & Rasio Mutu Bebas vs Sanksi)
   const execStats = useMemo(() => {
@@ -1150,7 +1148,7 @@ export function DashboardPage() {
                 <span className="colTime">Waktu</span>
                 <span className="colBatch">Frame</span>
                 <span className="colGrade">Mutu</span>
-                <span className="colConf">Akurasi</span>
+                <span className="colConf">Keyakinan</span>
               </div>
             )}
 
@@ -1443,7 +1441,7 @@ export function DashboardPage() {
                     </span>
                     <span>•</span>
                     <span>
-                      Akurasi AI: <strong>{Math.round((selectedCycle.averageConfidence ?? 0) * 100)}%</strong>
+                      Keyakinan AI: <strong>{Math.round((selectedCycle.averageConfidence ?? 0) * 100)}%</strong>
                     </span>
                   </div>
                 </div>
@@ -1640,7 +1638,7 @@ export function DashboardPage() {
                     />
                     <div className="catDonutCenter">
                       <strong>{hasLatestInference ? `${Math.round(gradeConf * 100)}%` : "—"}</strong>
-                      <span>Akurasi</span>
+                      <span>Keyakinan</span>
                     </div>
                   </div>
                   <div className="catGradeInfo">
@@ -1660,11 +1658,18 @@ export function DashboardPage() {
                 {/* Divider */}
                 <div className="catDivider" />
 
-                {/* AI Classification Probability Distribution */}
+                {hasLatestInference && gradeConf < 0.5 && (
+                  <p className="catConfidenceWarning" role="status">
+                    Keyakinan model di bawah 50%. Label masih berupa prediksi lemah dan perlu validasi QC.
+                  </p>
+                )}
+
+                {/* Distribution of selected frame labels, not model probabilities. */}
                 <div className="catMetricsTitle">
                   <TrendingUp size={11} />
-                  <span>Distribusi Probabilitas Kelas Mutu</span>
+                  <span>Distribusi Kelas Berdasarkan Frame</span>
                 </div>
+                <p className="catDistributionNote">Jumlah label prediksi per kelas, bukan keyakinan model. Total: {distributionFrames.length} frame.</p>
                 <div className="catGradeProbList">
                   {gradeDistribution.map((item) => (
                     <div
@@ -1677,15 +1682,18 @@ export function DashboardPage() {
                           <span className="catProbCode">{item.label}</span>
                           <span className="catProbName">({item.name})</span>
                         </div>
-                        <strong className="catProbValue" style={{ color: item.color }}>
-                          {hasLatestInference ? `${item.prob}%` : "—"}
-                        </strong>
+                        <div className="catProbValueGroup">
+                          <span className="catProbCountBadge">{item.count} frame</span>
+                          <strong className="catProbValue" style={{ color: item.color }}>
+                            {distributionFrames.length ? `${Number(item.percent.toFixed(1))}%` : "—"}
+                          </strong>
+                        </div>
                       </div>
                       <div className="catProbBarTrack">
                         <div
                           className="catProbBarFill"
                           style={{
-                            width: `${hasLatestInference ? item.prob : 0}%`,
+                            width: `${item.percent}%`,
                             background: item.grad
                           }}
                         />
@@ -1785,7 +1793,7 @@ export function DashboardPage() {
                 {/* Chart 1: Distribusi Mutu Kumulatif Pabrik (All Cycles) */}
                 <div className="catMetricsTitle">
                   <TrendingUp size={11} />
-                  <span>Distribusi Probabilitas Kelas Mutu</span>
+                  <span>Distribusi Kelas Berdasarkan Siklus</span>
                 </div>
                 <div className="catGradeProbList dailyProbList">
                   {dailyCyclesStats ? dailyCyclesStats.gradeCounts.map((item) => (
@@ -2049,13 +2057,13 @@ export function DashboardPage() {
                         <Layers size={13} />
                         <strong>DISTRIBUSI PROBABILITAS KELAS MUTU (AI)</strong>
                       </div>
-                      <span className="dist-card-sub">Referensi kelas mutu - validasi QC Malang</span>
+                      <span className="dist-card-sub">Skor asli model per frame. Skor yang tidak tersimpan ditampilkan sebagai tanda strip.</span>
                     </div>
 
                     <div className="dist-compact-list">
                       {KEBONAGUNG_GRADES.map((item, idx) => {
                         const isMatch = item.code === capGrade;
-                        const prob = isMatch ? confPercent : Math.max(1, Math.round((100 - confPercent) / 6));
+                        const prob = storedClassProbability(selectedCapture, item.code);
                         return (
                           <div
                             key={item.code}
@@ -2082,7 +2090,7 @@ export function DashboardPage() {
                                 <div
                                   className="dist-bar-fill"
                                   style={{
-                                    width: `${prob}%`,
+                                    width: `${prob ?? 0}%`,
                                     background: isMatch ? item.grad : "var(--color-border-strong)"
                                   }}
                                 />
@@ -2094,7 +2102,7 @@ export function DashboardPage() {
                                 className="dist-row-pct"
                                 style={{ color: isMatch ? item.color : "var(--color-text)" }}
                               >
-                                {prob}%
+                                {prob === undefined ? "—" : `${Number(prob.toFixed(2))}%`}
                               </strong>
                             </div>
                           </div>

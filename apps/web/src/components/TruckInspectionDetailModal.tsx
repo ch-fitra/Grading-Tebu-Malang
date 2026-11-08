@@ -157,7 +157,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                   <span>PREDICTED GRADE (RATA-RATA SIKLUS TRUK)</span>
                 </span>
                 <span className="truck-conf-pill">
-                  {Math.round((session.averageConfidence || 0.88) * 100)}% Akurasi AI
+                  {Math.round((session.averageConfidence ?? 0) * 100)}% Keyakinan AI
                 </span>
               </div>
 
@@ -369,7 +369,7 @@ export function TruckInspectionDetailModal({ session, history, onClose, onViewCa
                         <th style={{ width: "95px" }}>Frame</th>
                         <th style={{ width: "105px" }}>Waktu</th>
                         <th style={{ width: "115px" }}>Mutu AI</th>
-                        <th style={{ width: "90px" }}>Akurasi</th>
+                        <th style={{ width: "90px" }}>Keyakinan</th>
                         <th style={{ width: "100px", textAlign: "right" }}>Aksi</th>
                       </tr>
                     </thead>

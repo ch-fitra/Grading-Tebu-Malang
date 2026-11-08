@@ -1,5 +1,5 @@
 import { usePanelSize } from "../hooks/usePanelSize";
-import { frameNumbers, dominantGrade } from "../utils/grade-data";
+import { frameNumbers, dominantGrade, storedClassProbability } from "../utils/grade-data";
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   History,
@@ -302,7 +302,7 @@ export function HistoryPage() {
       "Karakteristik & Simbol",
       "Kebijakan Rafaksi",
       "Status Giling",
-      "Akurasi AI (%)"
+      "Keyakinan AI (%)"
     ];
     const body = filteredHistory.map((row) => {
       const station = resolveMbsStation(row.cameraId, cameras);
@@ -332,7 +332,7 @@ export function HistoryPage() {
       "Waktu Selesai",
       "Total Frame",
       "Predicted Grade AI",
-      "Rata-rata Akurasi (%)",
+      "Rata-rata Keyakinan (%)",
       "Keputusan Pabrik",
       "Status",
       "Catatan / SPAT"
@@ -540,7 +540,7 @@ export function HistoryPage() {
           </div>
 
           <div className="historyKpiCard">
-            <span className="historyKpiLabel">RATA-RATA AKURASI MODEL</span>
+            <span className="historyKpiLabel">RATA-RATA KEYAKINAN MODEL</span>
             <strong className="historyKpiValue green">
               {averageConfidence}
             </strong>
@@ -929,7 +929,7 @@ export function HistoryPage() {
                       <th>Karakteristik Mutu</th>
                       <th>Kebijakan Rafaksi</th>
                       <th>Status Giling</th>
-                      <th>Akurasi AI</th>
+                      <th>Keyakinan AI</th>
                       <th style={{ textAlign: "right" }}>Aksi</th>
                     </tr>
                   </thead>
@@ -1216,13 +1216,13 @@ export function HistoryPage() {
                         <Layers size={13} />
                         <strong>DISTRIBUSI PROBABILITAS KELAS MUTU (AI)</strong>
                       </div>
-                      <span className="dist-card-sub">Referensi kelas mutu - validasi QC Malang</span>
+                      <span className="dist-card-sub">Skor asli model per frame. Skor yang tidak tersimpan ditampilkan sebagai tanda strip.</span>
                     </div>
 
                     <div className="dist-compact-list">
                       {KEBONAGUNG_GRADES.map((item, idx) => {
                         const isMatch = item.code === capGrade;
-                        const prob = isMatch ? confPct : Math.max(1, Math.round((100 - confPct) / 6));
+                        const prob = storedClassProbability(selectedCapture, item.code);
                         return (
                           <div
                             key={item.code}
@@ -1249,7 +1249,7 @@ export function HistoryPage() {
                                 <div
                                   className="dist-bar-fill"
                                   style={{
-                                    width: `${prob}%`,
+                                    width: `${prob ?? 0}%`,
                                     background: isMatch ? item.grad : "var(--color-border-strong)"
                                   }}
                                 />
@@ -1261,7 +1261,7 @@ export function HistoryPage() {
                                 className="dist-row-pct"
                                 style={{ color: isMatch ? item.color : "var(--color-text)" }}
                               >
-                                {prob}%
+                                {prob === undefined ? "—" : `${Number(prob.toFixed(2))}%`}
                               </strong>
                             </div>
                           </div>

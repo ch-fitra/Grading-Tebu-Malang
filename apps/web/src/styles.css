@@ -8308,6 +8308,22 @@ main.dashboardMainFixed {
   gap: 6px;
 }
 
+.catDistributionNote,
+.catConfidenceWarning {
+  margin: 5px 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+.catConfidenceWarning {
+  padding: 6px 8px;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  color: var(--color-text);
+  background: rgba(217, 119, 6, 0.1);
+}
+
 .catProbCountBadge {
   font-size: 8.5px;
   color: var(--color-muted);

@@ -1,4 +1,25 @@
 import type { Grade, InferenceResult, TruckInspectionSession } from "../types";
+import { normalizeGrade } from "./grade-guide";
+
+// Count selected labels, independently of the model's probability vector.
+export function frameGradeDistribution(frames: Pick<InferenceResult, "grade">[], grades: Grade[]) {
+  const counts = new Map<Grade, number>();
+  for (const frame of frames) {
+    const grade = normalizeGrade(frame.grade);
+    counts.set(grade, (counts.get(grade) ?? 0) + 1);
+  }
+  return grades.map(code => {
+    const count = counts.get(code) ?? 0;
+    return { code, count, percent: frames.length ? count / frames.length * 100 : 0 };
+  });
+}
+
+// Missing historical scores are unknown; never invent probabilities for other classes.
+export function storedClassProbability(frame: Pick<InferenceResult, "classScores">, grade: Grade): number | undefined {
+  const value = frame.classScores?.[grade];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value : undefined;
+}
 export function dominantGrade(frames: Pick<InferenceResult, "grade">[]): Grade | undefined {
   const counts = new Map<Grade, number>();
   for (const frame of frames) counts.set(frame.grade, (counts.get(frame.grade) ?? 0) + 1);
