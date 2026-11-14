@@ -17,8 +17,6 @@ from typing import Dict, List, Optional, Tuple, Literal
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-# Keep the new installation off Trangkil's GPU unless explicitly configured.
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 try:
     import torch
     torch._dynamo.config.suppress_errors = True
@@ -27,6 +25,7 @@ except Exception:
     pass
 
 logger = logging.getLogger("ai_service")
+from inference_device import torch_device, execution_status, onnx_providers
 
 import cv2
 import numpy as np
@@ -74,6 +73,7 @@ from fastapi.staticfiles import StaticFiles
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info("Inference runtime: %s", execution_status())
     # Run Native DB Migrations for sugarcane_ai
     run_ai_migrations()
 
@@ -206,10 +206,15 @@ def model_session(config: ModelConfig):
             if path.suffix.lower() in [".keras", ".h5"]:
                 import keras
                 candidate = keras.models.load_model(str(path), compile=False)
+                if keras.backend.backend() != "torch":
+                    raise RuntimeError("This runtime requires KERAS_BACKEND=torch")
+                candidate.to(torch_device())
             else:
                 if ort is None:
                     raise HTTPException(status_code=503, detail="onnxruntime belum terpasang")
-                candidate = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+                candidate = ort.InferenceSession(str(path), providers=onnx_providers(ort))
+                if torch_device().startswith("cuda") and candidate.get_providers()[0] != "CUDAExecutionProvider":
+                    raise RuntimeError("ONNX CUDA initialization failed; refusing silent CPU fallback")
             # Keep frame and grading models resident independently.
             for old_key in list(_sessions):
                 if old_key[0] == str(path):
@@ -322,6 +327,7 @@ def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tupl
             if config.input_color == "rgb":
                 resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             tensor = np.expand_dims(resized.astype("float32"), axis=0)
+            tensor = torch.as_tensor(tensor, device=torch_device())
             with torch.no_grad():
                 preds = keras_model(tensor, training=False)
                 if hasattr(preds, "detach"):
@@ -354,6 +360,7 @@ def health():
     return {
         "status": "ok",
         "service": "ai-service",
+        "execution": execution_status(),
         "installation": "malang",
         "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file()},
         "model": {
