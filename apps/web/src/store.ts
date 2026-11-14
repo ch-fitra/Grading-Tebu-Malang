@@ -62,8 +62,8 @@ function legacySessions(): TruckInspectionSession[] {
 }
 function saveLegacy(sessions: TruckInspectionSession[]) { localStorage.setItem("tebu-malang-truck-sessions", JSON.stringify(sessions)); }
 
-let refreshVersion = 0;
-let appliedRefreshVersion = 0;
+// Coalesce each resource independently: slow history must not block camera/status.
+const pendingRefreshes = new Map<string, { session: Session; promise: Promise<void> }>();
 
 export const useAppStore = create<AppState>((set, get) => ({
   session: readSession(), latest: null, history: [], cameras: [], models: [], status: null, truckSessions: [], activeTruckSession: null, deletionRequests: [],
@@ -95,38 +95,42 @@ export const useAppStore = create<AppState>((set, get) => ({
   refresh: async () => {
     const current = get().session;
     if (!current) return;
-    const version = ++refreshVersion;
-    const failed = (error: unknown) => {
-      if (error instanceof ApiError && error.status === 401 && get().session?.token === current.token) get().logout();
-      return undefined;
-    };
-    const permissions = current.user.permissions;
-    const can = (permission: string) => permissions.includes(permission);
-    const [latest, history, cameras, models, status, backendTrucks, deletionRequests] = await Promise.all([
-      can("dashboard.read") ? api<InferenceResult | null>("/api/inference/latest").catch(failed) : Promise.resolve(null),
-      can("history.read") ? api<InferenceResult[]>("/api/inference/history").catch(failed) : Promise.resolve([]),
-      can("camera.read") ? api<CameraRow[]>("/api/cameras").catch(failed) : Promise.resolve([]),
-      can("model.read") ? api<AiModel[]>("/api/models").catch(failed) : Promise.resolve([]),
-      can("dashboard.read") ? api<SystemStatus>("/api/system/status").catch(failed) : Promise.resolve(null),
-      can("history.read") ? api<TruckInspectionSession[]>("/api/truck-inspections").catch(failed) : Promise.resolve([]),
-      can("dashboard.read") ? api<DeletionRequest[]>("/api/deletion-requests").catch(failed) : Promise.resolve([])
+    const can = (permission: string) => current.user.permissions.includes(permission);
+    const load = <T,>(key: string, path: string, permission: string, empty: T, apply: (value: T) => void) => {
+      const pending = pendingRefreshes.get(key);
+      if (pending?.session === current) return pending.promise;
+      const entry = { session: current, promise: Promise.resolve() };
+      entry.promise = Promise.resolve().then(async () => {
+        try {
+          const value = can(permission) ? await api<T>(path) : empty;
+          // Ignore responses from a logged-out or superseded session.
+          if (get().session === current) apply(value);
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 401 && get().session === current) get().logout();
+          // Retain confirmed data on a transient failure. Status becomes unknown,
+          // rather than inventing an outage for all three services.
+          else if (key === "status" && get().session === current) set({ status: null });
+        } finally {
+          if (pendingRefreshes.get(key) === entry) pendingRefreshes.delete(key);
+        }
+      });
+      pendingRefreshes.set(key, entry);
+      return entry.promise;
+    }
+    await Promise.all([
+      load("cameras", "/api/cameras", "camera.read", [] as CameraRow[], cameras => set({ cameras })),
+      load("status", "/api/system/status", "dashboard.read", null as SystemStatus | null, status => set({ status })),
+      load("latest", "/api/inference/latest", "dashboard.read", null as InferenceResult | null, latest => set({ latest })),
+      load("history", "/api/inference/history", "history.read", [] as InferenceResult[], history => set({ history })),
+      load("models", "/api/models", "model.read", [] as AiModel[], models => set({ models })),
+      load("trucks", "/api/truck-inspections", "history.read", [] as TruckInspectionSession[], backendTrucks => {
+        // The API already scopes inspections to this installation. Do not discard
+        // them just because the independently loaded camera list is still pending.
+        const trucks = [...backendTrucks, ...legacySessions()];
+        set({ truckSessions: trucks, activeTruckSession: trucks.find(item => item.status === "active") ?? null });
+      }),
+      load("deletions", "/api/deletion-requests", "dashboard.read", [] as DeletionRequest[], deletionRequests => set({ deletionRequests }))
     ]);
-    // A response may finish after the next poll starts. Apply completed responses
-    // in order, rather than discarding every response on a slower connection.
-    if (get().session !== current || version < appliedRefreshVersion) return;
-    appliedRefreshVersion = version;
-    const cameraIds = new Set((cameras ?? get().cameras).map(camera => camera.id));
-    const trucks = [...(backendTrucks ?? get().truckSessions.filter(item => !item.id.startsWith("session_"))), ...legacySessions()].filter(truck => cameraIds.has(truck.line));
-    set({
-      latest: latest === undefined ? get().latest : latest,
-      history: history ?? get().history,
-      cameras: cameras ?? get().cameras,
-      models: models ?? get().models,
-      status: status === undefined ? { backend: { status: "offline" }, ai: { status: "offline" }, database: { status: "unknown" }, websocket: { clients: 0 } } : status,
-      truckSessions: trucks,
-      activeTruckSession: trucks.find(item => item.status === "active") ?? null,
-      deletionRequests: deletionRequests ?? get().deletionRequests
-    });
   },
   createCamera: async camera => { await api<CameraRow>("/api/cameras", { method: "POST", body: JSON.stringify(camera) }); await get().refresh(); },
   updateCamera: async (id, patch) => { await api<CameraRow>(`/api/cameras/${id}`, { method: "PUT", body: JSON.stringify(patch) }); await get().refresh(); },

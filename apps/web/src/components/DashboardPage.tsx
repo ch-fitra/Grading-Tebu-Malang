@@ -67,9 +67,13 @@ export function DashboardPage() {
   const [modelFrames, setModelFrames] = useState<InferenceResult[]>([]);
   useEffect(() => {
     let cancelled = false;
+    let loadingFrames = false;
     const refreshFrames = async () => {
+      if (loadingFrames || cancelled) return;
+      loadingFrames = true;
       try { const frames = await api<InferenceResult[]>("/api/inference/model-frames"); if (!cancelled) setModelFrames(frames); }
       catch { /* Preserve the last confirmed database data during a temporary outage. */ }
+      finally { loadingFrames = false; }
     };
     void refreshFrames();
     const interval = setInterval(refreshFrames, 1000);
@@ -1089,13 +1093,13 @@ export function DashboardPage() {
               <div className="telItem">
                 <span className="telLabel">STATUS KAMERA</span>
                 <strong className={cameraLive ? "telGreen" : "telMuted"}>
-                  {cameraLive ? "ONLINE" : "OFFLINE"}
+                  {!status ? "UNKNOWN" : cameraLive ? "ONLINE" : "OFFLINE"}
                 </strong>
               </div>
               <div className="telItem">
                 <span className="telLabel">AI MODEL</span>
                 <strong className={status?.ai.model?.available ? "telGreen" : "telMuted"}>
-                  {status?.ai.model?.available ? "ACTIVE" : isAiOnline ? "UNAVAILABLE" : "OFFLINE"}
+                  {!status ? "UNKNOWN" : status.ai.model?.available ? "ACTIVE" : isAiOnline ? "UNAVAILABLE" : "OFFLINE"}
                 </strong>
               </div>
               <div className="telItem">
@@ -1107,7 +1111,7 @@ export function DashboardPage() {
               <div className="telItem">
                 <span className="telLabel">DATABASE</span>
                 <strong className={isDbOnline ? "telGreen" : "telMuted"}>
-                  {isDbOnline ? "CONNECTED" : "OFFLINE"}
+                  {!status ? "UNKNOWN" : isDbOnline ? "CONNECTED" : "OFFLINE"}
                 </strong>
               </div>
             </div>
