@@ -26,6 +26,27 @@ app.setErrorHandler((error, _request, reply) => {
   if (status >= 500) app.log.error(error);
   return reply.code(status).send({ message: conflict ? "Data sudah digunakan atau masih dirujuk data lain" : status >= 500 ? "Terjadi kesalahan layanan. Silakan coba kembali atau hubungi administrator." : failure.message });
 });
+// Observe fatal exceptions without suppressing Node's normal failure exit.
+process.on("uncaughtExceptionMonitor", error => {
+  app.log.fatal({ errorName: error.name, errorCode: (error as NodeJS.ErrnoException).code }, "API fatal exception; process will exit");
+});
+process.on("exit", code => { app.log.info({ exitCode: code }, "API process exit"); });
+let shuttingDown = false;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info({ signal }, "API shutdown requested");
+    const deadline = setTimeout(() => {
+      app.log.fatal("API shutdown exceeded 15 seconds");
+      process.exit(1);
+    }, 15000);
+    void app.close().then(() => { clearTimeout(deadline); }, error => {
+      app.log.error({ errorName: (error as Error).name }, "API shutdown failed");
+      process.exitCode = 1;
+    });
+  });
+}
 const aiServiceHeaders = { "X-Sugarcane-Service-Token": process.env.AI_SERVICE_TOKEN ?? createHmac("sha256", process.env.JWT_SECRET ?? "local-development-secret-change-me").update("sugarcane-ai-service").digest("hex") };
 const credentialAttempts = new Map<string, { count: number; until: number }>();
 function allowCredentialAttempt(key: string) {
@@ -39,7 +60,7 @@ function allowCredentialAttempt(key: string) {
   return true;
 }
 const clients = new Set<{ send: (payload: string) => void }>();
-app.addHook("onClose", async () => { await pool.end(); });
+app.addHook("onClose", async () => { await Promise.all([pool.end(), store.close()]); });
 
 await store.initialize();
 await auth.initialize();

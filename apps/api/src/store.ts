@@ -51,6 +51,7 @@ export const DEFAULT_MODELS: Omit<AiModel, "createdAt">[] = [
 ];
 
 export const store = {
+  async close() { await aiPool?.end(); },
   async initialize() {
     await pool.query("SELECT 1");
     await pool.query("CREATE TABLE IF NOT EXISTS ai_capture_sync (id integer PRIMARY KEY CHECK (id=1), last_ai_id bigint NOT NULL DEFAULT 0)");

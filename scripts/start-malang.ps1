@@ -4,7 +4,23 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $runtime = Join-Path $projectRoot '.runtime/malang'
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 $manifest = Join-Path $runtime 'processes.json'
-if (Test-Path -LiteralPath $manifest) { throw 'Manifest Malang sudah ada. Jalankan stop-malang.ps1 sebelum start ulang.' }
+# Hold an exclusive file handle for the entire startup, including preflight.
+try { $startupLock = [IO.File]::Open((Join-Path $runtime 'startup.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
+catch { throw 'Startup Malang lain sedang berjalan. Tunggu hingga selesai.' }
+try {
+if (Test-Path -LiteralPath $manifest) {
+    $oldRecords = @(Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json)
+    foreach ($record in $oldRecords) {
+        if (Get-CimInstance Win32_Process -Filter "ProcessId=$($record.Id)") {
+            throw "Manifest masih menunjuk PID hidup $($record.Id). Periksa identitas dan stop Malang sebelum start ulang."
+        }
+    }
+    foreach ($port in @(4111,8011,8081)) {
+        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) { throw "Manifest lama tetapi port $port masih aktif; tidak diarsipkan." }
+    }
+    Move-Item -LiteralPath $manifest -Destination (Join-Path $runtime ('processes-stale-' + [guid]::NewGuid().ToString('N') + '.json'))
+    Write-Host '[preflight] Manifest proses mati diarsipkan; tidak ada proses dihentikan.'
+}
 foreach ($port in @(4111,8011,8081)) {
     if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) { throw "Port Malang $port sedang dipakai. Tidak ada proses yang dihentikan atau digunakan ulang." }
 }
@@ -30,8 +46,12 @@ function Record-Process($process, $kind) {
     $script:records += [pscustomobject]@{ Id=$process.Id; Kind=$kind; Executable=$identity.ExecutablePath; Created=$identity.CreationDate.ToUniversalTime().ToString('o'); Command=$identity.CommandLine }
     $script:records | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifest -Encoding UTF8
 }
-function Wait-Malang($port) {
-    for ($attempt=0; $attempt -lt 60; $attempt++) {
+function Wait-Malang($port, $process) {
+    Write-Host "[readiness] Menunggu port $port (PID $($process.Id)); log: $runtime"
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $process.Refresh()
+        if ($process.HasExited) { throw "Proses port $port keluar dengan exit code $($process.ExitCode); periksa $runtime" }
         try {
             $result = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 2
             if ($result.installation -eq 'malang' -and $result.status -eq 'ok') { return }
@@ -41,13 +61,21 @@ function Wait-Malang($port) {
     throw "Layanan Malang port $port belum siap; periksa $runtime"
 }
 try {
+    Write-Host '[preflight] Build dan pemeriksaan dependensi Python.'
+    $previousEnv['KERAS_BACKEND'] = [Environment]::GetEnvironmentVariable('KERAS_BACKEND', 'Process')
+    if (-not $env:KERAS_BACKEND) { $env:KERAS_BACKEND = 'torch' }
     if (-not $SkipBuild) { & npm.cmd run build; if ($LASTEXITCODE -ne 0) { throw 'Build gagal' } }
-    & $Python -c 'import uvicorn, cv2, psycopg2, fastapi, keras, torch'; if ($LASTEXITCODE -ne 0) { throw 'Dependensi Python belum lengkap. Pasang requirements di .venv Malang.' }
+    $probe = Start-Process -FilePath $Python -ArgumentList @('-c', '"import uvicorn, cv2, psycopg2, fastapi, keras, torch; print(keras.backend.backend())"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'python-check.log') -RedirectStandardError (Join-Path $runtime 'python-check-error.log')
+    if (-not $probe.WaitForExit(120000)) { $probe.Kill(); throw "Pemeriksaan Python melewati 120 detik; periksa $runtime/python-check-error.log" }
+    $probe.Refresh()
+    if ($probe.ExitCode -ne 0) { throw "Dependensi Python gagal (exit $($probe.ExitCode)); periksa $runtime/python-check-error.log" }
+    Write-Host '[startup] Menjalankan API Malang.'
     $api = Start-Process -FilePath $node -ArgumentList ('"' + (Join-Path $projectRoot 'apps/api/dist/server.js') + '"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'api.log') -RedirectStandardError (Join-Path $runtime 'api-error.log')
-    Record-Process $api 'api'; Wait-Malang 4111
+    Record-Process $api 'api'; Wait-Malang 4111 $api
+    Write-Host '[startup] Menjalankan AI Malang.'
     $aiArgs = @('-m','uvicorn','main:app','--app-dir',('"' + (Join-Path $projectRoot 'apps/ai-service') + '"'),'--host','127.0.0.1','--port','8011')
     $ai = Start-Process -FilePath $Python -ArgumentList $aiArgs -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'ai.log') -RedirectStandardError (Join-Path $runtime 'ai-error.log')
-    Record-Process $ai 'ai'; Wait-Malang 8011
+    Record-Process $ai 'ai'; Wait-Malang 8011 $ai
     # Windows venv python.exe can be a launcher with a child interpreter.
     # Track the actual listener as well so stopping never leaves an orphan AI.
     $aiListener = Get-NetTCPConnection -State Listen -LocalPort 8011 | Select-Object -First 1
@@ -62,13 +90,20 @@ try {
     $prefix = ($runtime.Replace('\','/') + '/')
     & $nginx -t -p $prefix -c conf/nginx.conf; if ($LASTEXITCODE -ne 0) { throw 'Konfigurasi Nginx tidak valid' }
     $gateway = Start-Process -FilePath $nginx -ArgumentList @('-p',('"'+$prefix+'"'),'-c','conf/nginx.conf') -WorkingDirectory $runtime -WindowStyle Hidden -PassThru
-    Record-Process $gateway 'gateway'; Wait-Malang 8081
+    Record-Process $gateway 'gateway'; Wait-Malang 8081 $gateway
     Write-Host 'Malang siap: http://127.0.0.1:8081. Trangkil tidak diubah.'
 } catch {
-    Write-Warning 'Startup Malang gagal. Membersihkan hanya proses dalam manifest Malang.'
-    if (Test-Path -LiteralPath $manifest) { & (Join-Path $PSScriptRoot 'stop-malang.ps1') }
-    throw
+    $startupFailure = $_
+    Write-Warning ("Startup Malang gagal: " + $startupFailure.Exception.Message)
+    try {
+        if (Test-Path -LiteralPath $manifest) { & (Join-Path $PSScriptRoot 'stop-malang.ps1') }
+    } catch {
+        Write-Warning ("Pembersihan ditolak/gagal; manifest dipertahankan: " + $_.Exception.Message)
+    }
+    throw $startupFailure
 } finally {
     foreach ($key in $previousEnv.Keys) { [Environment]::SetEnvironmentVariable($key,$previousEnv[$key],'Process') }
     Pop-Location
 }
+
+} finally { $startupLock.Dispose() }

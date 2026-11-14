@@ -10,7 +10,7 @@ for(const [key,table,condition,name] of [
   ['AI_DATABASE_URL','ai_results',"status='running'",'sugarcane_ai_malang']
 ]) {
   if(new URL(env[key]).pathname!=='/'+name)throw new Error('Database Malang tidak sesuai');
-  const client=new pg.Client({connectionString:env[key],connectionTimeoutMillis:5000});await client.connect();
+  const client=new pg.Client({connectionString:env[key],connectionTimeoutMillis:5000,query_timeout:10000,statement_timeout:10000});await client.connect();
   try {
     const exists=await client.query('SELECT to_regclass($1) AS table_name',[table]);
     if(exists.rows[0].table_name) {
