@@ -66,9 +66,13 @@ try {
     if (-not $env:KERAS_BACKEND) { $env:KERAS_BACKEND = 'torch' }
     if (-not $SkipBuild) { & npm.cmd run build; if ($LASTEXITCODE -ne 0) { throw 'Build gagal' } }
     $probe = Start-Process -FilePath $Python -ArgumentList @('-c', '"import uvicorn, cv2, psycopg2, fastapi, keras, torch; print(keras.backend.backend())"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'python-check.log') -RedirectStandardError (Join-Path $runtime 'python-check-error.log')
+    # Retain the native handle before waiting (Windows PowerShell 5.1).
+    $probeHandle = $probe.Handle
     if (-not $probe.WaitForExit(120000)) { $probe.Kill(); throw "Pemeriksaan Python melewati 120 detik; periksa $runtime/python-check-error.log" }
-    $probe.Refresh()
-    if ($probe.ExitCode -ne 0) { throw "Dependensi Python gagal (exit $($probe.ExitCode)); periksa $runtime/python-check-error.log" }
+    $probe.WaitForExit()
+    $probeExitCode = $probe.ExitCode
+    if ($null -eq $probeExitCode) { throw 'Exit code pemeriksaan Python tidak tersedia; tidak diasumsikan berhasil.' }
+    if ($probeExitCode -ne 0) { throw "Dependensi Python gagal (exit $probeExitCode); periksa $runtime/python-check-error.log" }
     Write-Host '[startup] Menjalankan API Malang.'
     $api = Start-Process -FilePath $node -ArgumentList ('"' + (Join-Path $projectRoot 'apps/api/dist/server.js') + '"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'api.log') -RedirectStandardError (Join-Path $runtime 'api-error.log')
     Record-Process $api 'api'; Wait-Malang 4111 $api
