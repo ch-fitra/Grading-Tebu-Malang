@@ -1,5 +1,6 @@
 import "./env.js";
 import pg from "pg";
+import type { HistoryQuery } from "./history-query.js";
 import { randomUUID } from "node:crypto";
 import { pool, transaction } from "./db.js";
 import type { ClassPercentages, Grade } from "./rule-engine.js";
@@ -50,6 +51,8 @@ export const DEFAULT_MODELS: Omit<AiModel, "createdAt">[] = [
   { id: 1, name: "Sugarcane Malang 11 Classes", version: "malang-1", path: "apps/ai-service/models/active/model_sugarcane_malang.keras", active: true }
 ];
 
+let captureSync: Promise<number> | null = null;
+
 export const store = {
   async close() { await aiPool?.end(); },
   async initialize() {
@@ -97,7 +100,8 @@ export const store = {
   },
   async syncModelCaptures() {
     if (!aiPool) return 0;
-    return transaction(async client => {
+    if (captureSync) return captureSync;
+    const pending = transaction(async client => {
       const marker = await client.query("SELECT last_ai_id FROM ai_capture_sync WHERE id=1 FOR UPDATE");
       const frames = (await aiPool.query("SELECT id, camera_id, cycle_code, created_at, detected_class, classes_score, confidence, snapshot_path FROM ai_inference_results WHERE id>$1 ORDER BY id LIMIT 5000", [marker.rows[0].last_ai_id])).rows;
       let imported = 0;
@@ -119,6 +123,9 @@ export const store = {
       if (frames.length) await client.query("UPDATE ai_capture_sync SET last_ai_id=$1 WHERE id=1", [frames.at(-1).id]);
       return imported;
     });
+    captureSync = pending;
+    try { return await pending; }
+    finally { if (captureSync === pending) captureSync = null; }
   },
   async listModelFrames(): Promise<InferenceResult[]> {
     const result = await pool.query("SELECT * FROM inference_results ORDER BY created_at DESC LIMIT 5000");
@@ -132,8 +139,10 @@ export const store = {
     const result = await pool.query("SELECT * FROM inference_results WHERE id=$1", [id]);
     return result.rowCount ? (await withDetectedClasses([inferenceRow(result.rows[0])]))[0] : null;
   },
-  async listInference(): Promise<InferenceResult[]> {
-    return withDetectedClasses((await pool.query("SELECT * FROM inference_results ORDER BY created_at DESC LIMIT 1000")).rows.map(inferenceRow));
+  async listInference(range?: HistoryQuery): Promise<InferenceResult[]> {
+    return withDetectedClasses((await pool.query(`SELECT * FROM inference_results
+      WHERE ($1::timestamptz IS NULL OR created_at >= $1) AND ($2::timestamptz IS NULL OR created_at < $2)
+      ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`, [range?.start_at ?? null, range?.end_at ?? null, range?.limit ?? 1000, range?.offset ?? 0])).rows.map(inferenceRow));
   },
   async addInference(result: Omit<InferenceResult, "id">) {
     const row = await transaction(async client => {

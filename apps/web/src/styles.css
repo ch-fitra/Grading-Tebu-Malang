@@ -17043,3 +17043,54 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline:2px so
   height: auto;
   min-height: 0;
 }
+
+/* History calendar filters share the same WIB interval as server queries. */
+.historyDateInputs { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; }
+.historyDateInputs label { display:flex; flex-direction:column; gap:5px; min-width:170px; font-size:12px; color:var(--color-text); }
+.historyDateInputs input { min-height:38px; padding:8px 10px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); color:var(--color-text); font:inherit; color-scheme:light; }
+[data-theme="dark"] .historyDateInputs input { color-scheme:dark; }
+.historyDateInputs > span { flex:1 1 220px; font-size:11px; color:var(--color-muted); padding-bottom:8px; }
+.historyDateFeedback { margin:4px 0; font-size:12px; }
+.historyDateFeedback[role="alert"] { color:#c2410c; }
+.historyExportBtn:disabled { opacity:.5; cursor:not-allowed; }
+
+.historyDateStamp { display:block; font-size:10px; color:var(--color-muted); line-height:1.4; }
+.historyDateStamp + .timeText { white-space:nowrap; }
+
+.historyPageContainer .endTimeWrap .historyDateStamp { flex-basis:100%; }
+
+/* Portaled filter lists stay clear of clipped tables and compact filter panels. */
+.filterSelectTrigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-width:0; min-height:39px; padding:9px 12px; border:1px solid var(--color-border); border-radius:9px; background:var(--color-surface-solid); color:var(--color-text); font:inherit; font-size:12px; font-weight:600; text-align:left; cursor:pointer; transition:border-color .18s, box-shadow .18s, background .18s; }
+.filterSelectTrigger > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.filterSelectTrigger > svg { flex-shrink:0; color:var(--color-muted); transition:transform .2s ease; }
+.filterSelectTrigger:hover { border-color:var(--color-primary); }
+.filterSelectTrigger:focus-visible, .filterSelectTrigger[data-open="true"] { outline:none; border-color:var(--color-primary); box-shadow:0 0 0 3px var(--color-primary-soft); }
+.filterSelectTrigger[data-open="true"] > svg { transform:rotate(180deg); }
+.filterSelectMenu { position:fixed; z-index:10000; box-sizing:border-box; padding:6px; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--color-border-strong); border-radius:13px; background:var(--color-surface-solid); color:var(--color-text); box-shadow:0 14px 38px rgba(15,23,42,.16),0 3px 8px rgba(15,23,42,.06); outline:none; transform-origin:top center; animation:filterMenuEnter .18s cubic-bezier(.2,.8,.2,1) both; }
+.filterSelectMenu[data-above="true"] { transform-origin:bottom center; }
+.filterSelectMenu[data-open="false"] { pointer-events:none; animation:filterMenuExit .15s ease both; }
+.filterSelectOption { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:44px; box-sizing:border-box; padding:10px; border-radius:8px; font-size:12px; cursor:pointer; transition:background .12s,color .12s; }
+.filterSelectOptionLabel { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+.filterSelectOption[data-active="true"]:not([aria-disabled="true"]) { background:var(--color-primary-soft); }
+.filterSelectOption[aria-selected="true"] { color:var(--color-primary); background:var(--color-primary-soft); }
+.filterSelectOption[aria-disabled="true"] { color:var(--color-muted-2); cursor:not-allowed; }
+.filterSelectUnavailable { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; font-size:9px; background:var(--color-surface-muted); padding:3px 5px; border-radius:5px; }
+.filterSelectCheck { color:var(--color-primary); flex-shrink:0; }
+.filterSelectOptionSpacer { width:15px; flex-shrink:0; }
+@keyframes filterMenuEnter { from { opacity:0; transform:translateY(-5px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+@keyframes filterMenuExit { from { opacity:1; transform:translateY(0) scale(1); } to { opacity:0; transform:translateY(-4px) scale(.98); } }
+@media (prefers-reduced-motion:reduce) { .filterSelectMenu,.filterSelectMenu[data-open="false"] { animation-duration:.01ms; } .filterSelectTrigger,.filterSelectTrigger > svg,.filterSelectOption { transition:none; } }
+
+
+/* Camera full view is confined to the browser/Electron content viewport. */
+dialog.cameraViewportDialog[open] { display:block; padding:0; margin:0; border:0; color:inherit; box-sizing:border-box; max-width:none; }
+dialog.cameraViewportDialog::backdrop { background:#020617; }
+.dashboardPage.newLayout dialog.cameraViewportDialog.fullscreenMode { width:100vw !important; height:100vh !important; width:100dvw !important; height:100dvh !important; border-radius:0 !important; padding:0 !important; max-height:none !important; max-width:none !important; overflow:hidden; }
+.dashboardPage.newLayout dialog.cameraViewportDialog.fullscreenMode .streamVideoContainer { top:52px; bottom:0; height:calc(100% - 52px); }
+.dashboardPage.newLayout dialog.cameraViewportDialog.fullscreenMode .noStreamPlaceholder { position:absolute; inset:52px 0 0; width:100%; height:calc(100% - 52px); }
+.cameraFullViewHeader { position:absolute; inset:0 0 auto; z-index:2; height:52px; padding:0 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; color:#f8fafc; background:#080f20; border-bottom:1px solid #233047; box-sizing:border-box; }
+.cameraFullViewHeader > span { display:flex; align-items:center; gap:8px; min-width:0; font-size:13px; font-weight:600; }
+.cameraFullViewHeader > span > svg { color:#34d399; flex-shrink:0; }
+.cameraFullViewClose { display:flex; align-items:center; gap:6px; flex-shrink:0; min-height:36px; padding:6px 10px; border:1px solid #334155; border-radius:8px; background:#152035; color:#f8fafc; cursor:pointer; font:inherit; font-size:12px; transition:background .15s; }
+.cameraFullViewClose:hover { background:#26364f; }
+.cameraFullViewClose:focus-visible { outline:2px solid #38bdf8; outline-offset:2px; }

@@ -34,7 +34,7 @@ export type AiModel = {
 
 export type SystemStatus = {
   backend: { status: string };
-  ai: { status: string; model?: { name: string; version: string; available: boolean }; cameras?: Record<string, { live: boolean; fps: number }>; capabilities?: { conveyor_empty?: boolean } };
+  ai: { status: string; model?: { name: string; version: string; available: boolean; confidence_threshold?: number }; cameras?: Record<string, { live: boolean; fps: number }>; capabilities?: { conveyor_empty?: boolean } };
   database: { status: string };
   websocket: { clients: number };
 };

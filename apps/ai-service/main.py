@@ -9,6 +9,7 @@ import json
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from contextlib import asynccontextmanager
+from functools import lru_cache
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,12 +18,9 @@ from typing import Dict, List, Optional, Tuple, Literal
 
 os.environ.setdefault("KERAS_BACKEND", "torch")
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-try:
-    import torch
-    torch._dynamo.config.suppress_errors = True
-    torch.set_num_threads(int(os.getenv("AI_TORCH_THREADS", "2")))
-except Exception:
-    pass
+import torch
+torch._dynamo.config.suppress_errors = True
+torch.set_num_threads(int(os.getenv("AI_TORCH_THREADS", "2")))
 
 logger = logging.getLogger("ai_service")
 from inference_device import torch_device, execution_status, onnx_providers
@@ -195,6 +193,22 @@ def configured_model_path(config: ModelConfig) -> Path:
     return path
 
 
+@lru_cache(maxsize=8)
+def _artifact_hash(path: str, modified_ns: int, size: int) -> str:
+    # mtime and size invalidate this cache when the deployed artifact changes.
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def model_fingerprint(config: ModelConfig) -> str:
+    path = configured_model_path(config)
+    stat = path.stat()
+    return _artifact_hash(str(path), stat.st_mtime_ns, stat.st_size)
+
+
 def model_session(config: ModelConfig):
     global _session, _session_key
     path = configured_model_path(config)
@@ -265,8 +279,8 @@ def classification_measurement(output: np.ndarray, config: ModelConfig) -> Tuple
         raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
     
     # Scale to percentage (0.0 - 100.0%)
-    classes = {name: round(float(prob) * 100, 2) for name, prob in zip(config.classes, arr)}
-    max_confidence = round(float(np.max(arr)), 4)
+    classes = {name: float(prob) * 100 for name, prob in zip(config.classes, arr)}
+    max_confidence = float(np.max(arr))
     return classes, max_confidence
 
 
@@ -296,7 +310,7 @@ def segmentation_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[D
 def measurement_result(classes: Dict[str, float], config: ModelConfig) -> Tuple[Dict[str, float], Optional[float], str, bool]:
     """Keep grade probabilities distinct from measured segmentation area."""
     if config.type == "classification":
-        scores = {grade: round(float(value), 2) for grade, value in classes.items()
+        scores = {grade: float(value) for grade, value in classes.items()
                   if grade in config.classes}
         if not scores:
             raise HTTPException(status_code=422, detail="Model grading tidak menghasilkan kelas mutu yang dikenali")
@@ -366,9 +380,15 @@ def health():
         "model": {
             "name": config.name,
             "version": config.version,
+            "confidence_threshold": config.threshold,
+            "sha256": model_fingerprint(config) if configured_model_path(config).is_file() else None,
+            "output_activation": config.output_activation,
+            "input_color": config.input_color,
+            "class_order_source": "configuration_only",
             "available": configured_model_path(config).is_file() and (configured_model_path(config).suffix.lower() in (".keras", ".h5") or ort is not None),
         },
-        "cameras": {str(camera_id): {"live": stream.is_connected, "fps": round(stream.fps, 1)}
+        "cameras": {str(camera_id): {"live": stream.is_connected and time.time() - stream.last_frame_time < 4.0,
+                                  "fps": round(stream.fps, 1) if time.time() - stream.last_frame_time < 4.0 else 0.0}
                     for camera_id, stream in list(stream_manager.streams.items())},
     }
 
@@ -578,7 +598,7 @@ def _frame_detection_image(camera_id, image, config=None):
 
 def _detection_region(camera_id):
     if load_frame_config().frame_input == "embedded_roi":
-        return "incoming"
+        return "model_roi"
     roi = load_all_rois().get(camera_id)
     return "incoming" if roi and roi.incoming and roi.incoming.enabled else "full_frame"
 
@@ -879,6 +899,8 @@ def infer(payload: InferRequest):
         "classes": mapped_scores,
         "detected_class": detected_class,
         "detected_class_index": config.classes.index(detected_class) if config.type == "classification" else None,
+        "model_sha256": model_fingerprint(config),
+        "below_confidence_threshold": confidence < config.threshold,
         "grade": grade,
         "total_impurity": total_impurity,
         "impurity_measured": impurity_measured,

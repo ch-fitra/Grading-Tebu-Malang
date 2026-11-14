@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import type { HistoryQuery } from "./history-query.js";
 import { pool, transaction } from "./db.js";
 
 type Input = { truckCode: string; plateNumber?: string; driverName?: string; supplier?: string; line: number; notes?: string };
@@ -21,8 +22,8 @@ async function syncCaptures(db: Queryable, id?: string) {
     WHERE (($1::uuid IS NULL AND t.status='active') OR t.id=$1) ON CONFLICT DO NOTHING`, [id ?? null]);
 }
 
-async function read(id?: string, db: Queryable = pool): Promise<TruckRecord[]> {
-  await syncCaptures(db, id);
+async function read(id?: string, db: Queryable = pool, range?: HistoryQuery): Promise<TruckRecord[]> {
+  if (!range?.offset) await syncCaptures(db, id);
   const result = await db.query(`SELECT t.*,
     COALESCE(array_agg(i.id ORDER BY i.created_at) FILTER (WHERE i.id IS NOT NULL), '{}') AS capture_ids,
     COUNT(i.id)::int AS total_captures,
@@ -33,7 +34,10 @@ async function read(id?: string, db: Queryable = pool): Promise<TruckRecord[]> {
     FROM truck_inspections t
     LEFT JOIN truck_inspection_captures c ON c.inspection_id=t.id
     LEFT JOIN inference_results i ON i.id=c.inference_id
-    WHERE ($1::uuid IS NULL OR t.id=$1) GROUP BY t.id ORDER BY t.started_at DESC LIMIT 500`, [id ?? null]);
+    WHERE ($1::uuid IS NULL OR t.id=$1)
+      AND ($2::timestamptz IS NULL OR t.started_at >= $2)
+      AND ($3::timestamptz IS NULL OR t.started_at < $3)
+    GROUP BY t.id ORDER BY t.started_at DESC, t.id DESC LIMIT $4 OFFSET $5`, [id ?? null, range?.start_at ?? null, range?.end_at ?? null, range?.limit ?? 500, range?.offset ?? 0]);
   return result.rows.map(r => {
     const impurity = Number(r.measured_impurity);
     const count = Number(r.total_captures);
@@ -65,7 +69,7 @@ async function update(db: Queryable, id: string, patch: TruckPatch) {
 }
 
 export const trucks = {
-  async list() { return read(); },
+  async list(range?: HistoryQuery) { return read(undefined, pool, range); },
   async get(id: string) { return (await read(id))[0] ?? null; },
   async create(data: Input) {
     return transaction(async client => {

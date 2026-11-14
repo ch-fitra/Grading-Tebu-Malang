@@ -7,13 +7,17 @@ pool.on("error", () => console.error("Koneksi PostgreSQL terputus; periksa layan
 
 export async function transaction<T>(work: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
+  let discardClient: Error | undefined;
   try {
     await client.query("BEGIN");
     const value = await work(client);
     await client.query("COMMIT");
     return value;
   } catch (error) {
-    await client.query("ROLLBACK");
+    try { await client.query("ROLLBACK"); }
+    catch (rollbackError) {
+      discardClient = rollbackError instanceof Error ? rollbackError : new Error("Rollback failed");
+    }
     throw error;
-  } finally { client.release(); }
+  } finally { client.release(discardClient); }
 }

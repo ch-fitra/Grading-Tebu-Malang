@@ -1,3 +1,4 @@
+import { FilterSelect } from "./shared/FilterSelect";
 import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, storedClassProbability } from "../utils/grade-data";
 import { useState, useEffect, useMemo, useRef } from "react";
@@ -21,7 +22,6 @@ import {
   Trash2,
   Layers,
   Lock,
-  ChevronDown,
   SlidersHorizontal,
   FileSpreadsheet
 } from "lucide-react";
@@ -32,7 +32,8 @@ import { TappingSyncModal } from "./TappingSyncModal";
 import { RequestDeletionModal } from "./RequestDeletionModal";
 import { AdminApprovalQueueModal } from "./AdminApprovalQueueModal";
 import { KEBONAGUNG_GRADES, gradeDefinition, normalizeGrade } from "../utils/grade-guide";
-import { aiApi, backendUrl } from "../utils/api";
+import { historyDateRange, withinHistoryRange, jakartaDate, type HistoryDateFilter } from "../utils/history-dates";
+import { api, aiApi, backendUrl } from "../utils/api";
 import type { TruckInspectionSession, InferenceResult } from "../types";
 
 import { resolveMbsStation } from "../utils/stations";
@@ -44,14 +45,14 @@ type HistorySummary = {
 
 export function HistoryPage() {
   const { history, truckSessions, cameras, session, status, deleteTruckInspection, deleteInference, deletionRequests } = useAppStore();
-  const frameNumberMap = frameNumbers(history, truckSessions || []);
-  const frameNumber = (id: number) => frameNumberMap.get(id) ?? 1;
   const cycleGrade = (row: TruckInspectionSession) => {
+    if (row.detectedGrade) return row.detectedGrade;
+    if (row.totalCaptures === 0) return "";
     const ids = new Set(row.captureIds || []);
     const start = new Date(row.startedAt).getTime();
     const end = row.completedAt ? new Date(row.completedAt).getTime() : Date.now();
-    return dominantGrade(history.filter(item => ids.size ? ids.has(item.id) :
-      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000)) ?? "";
+    return dominantGrade(sourceHistory.filter(item => item.cameraId === row.line && (ids.size ? ids.has(item.id) :
+      new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000))) ?? "";
   };
   const canWrite = useAppStore(s => s.session?.user.permissions?.includes("inspection.write") ?? false);
   const isAdmin = session?.user.role === "admin";
@@ -79,7 +80,12 @@ export function HistoryPage() {
 
   // Search & Filtering States
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDateFilter, setSelectedDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [selectedDateFilter, setSelectedDateFilter] = useState<HistoryDateFilter>("all");
+  const [dateFrom, setDateFrom] = useState(() => jakartaDate());
+  const [dateTo, setDateTo] = useState(() => jakartaDate());
+  const [datedRecords, setDatedRecords] = useState<{ key: string; history: InferenceResult[]; trucks: TruckInspectionSession[] } | null>(null);
+  const [dateLoading, setDateLoading] = useState(false);
+  const [dateLoadError, setDateLoadError] = useState("");
   const [selectedLineFilter, setSelectedLineFilter] = useState<number | "all">("all");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string | "all">("all");
 
@@ -96,7 +102,7 @@ export function HistoryPage() {
   const historyPageSize = activeTab === "trucks" ? (compactLayout ? compactCyclePageSize : 5) : capturePageSize;
   useEffect(() => {
     setHistoryPage(1);
-  }, [activeTab, searchQuery, selectedDateFilter, selectedLineFilter, selectedStatusFilter]);
+  }, [activeTab, searchQuery, selectedDateFilter, dateFrom, dateTo, selectedLineFilter, selectedStatusFilter]);
   useEffect(() => {
     const table = tableWrapRef.current;
     if (!table) return;
@@ -127,11 +133,59 @@ export function HistoryPage() {
     localStorage.setItem("tebu-malang-ui-theme", next);
   };
 
+  const todayWib = jakartaDate(clock);
+  const dateRange = useMemo(() => historyDateRange(selectedDateFilter, dateFrom, dateTo, clock), [selectedDateFilter, dateFrom, dateTo, todayWib]);
+  const dateKey = `${dateRange.start ?? ""}/${dateRange.end ?? ""}`;
+  const scopedDates = selectedDateFilter !== "all";
+  useEffect(() => {
+    setDateLoadError("");
+    if (!scopedDates || dateRange.error || !dateRange.start || !dateRange.end || !session) {
+      setDateLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = new AbortController();
+    const load = async () => {
+      setDateLoading(true);
+      async function pages<T>(path: string): Promise<T[]> {
+        const records: T[] = [];
+        for (let offset = 0; ; offset += 500) {
+          const params = new URLSearchParams({ start_at: dateRange.start!, end_at: dateRange.end!, limit: "500", offset: String(offset) });
+          const batch = await api<T[]>(`${path}?${params}`, { signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20000)]) });
+          records.push(...batch);
+          if (batch.length < 500) return records;
+        }
+      }
+      try {
+        const [frames, cycles] = await Promise.all([
+          pages<InferenceResult>("/api/inference/history"),
+          pages<TruckInspectionSession>("/api/truck-inspections")
+        ]);
+        if (!cancelled) {
+          setDatedRecords({ key: dateKey, history: frames, trucks: cycles });
+          setDateLoadError("");
+        }
+      } catch {
+        if (!cancelled) setDateLoadError("Riwayat tanggal belum berhasil dimuat. Periksa koneksi; sistem akan mencoba kembali.");
+      } finally {
+        if (!cancelled) { setDateLoading(false); timer = setTimeout(load, 15000); }
+      }
+    };
+    if (session.user.permissions.includes("history.read")) void load();
+    return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
+  }, [session?.token, scopedDates, dateRange.start, dateRange.end, dateRange.error, dateKey]);
+  const dateResultsReady = !scopedDates || (!dateRange.error && datedRecords?.key === dateKey);
+  const dateExportBlocked = scopedDates && (!dateResultsReady || dateLoading || Boolean(dateLoadError));
+  const sourceHistory = scopedDates ? (dateResultsReady ? datedRecords!.history : []) : history;
+  const sourceTrucks = scopedDates ? (dateResultsReady ? datedRecords!.trucks : []) : truckSessions;
+  const frameNumberMap = useMemo(() => frameNumbers(sourceHistory, sourceTrucks), [sourceHistory, sourceTrucks]);
+  const frameNumber = (id: number) => frameNumberMap.get(id) ?? 1;
   const visibleCameras = cameras;
   const availableLines = new Set(visibleCameras.map(camera => resolveMbsStation(camera.id, cameras).mbsNum));
   const allowedCameraIds = new Set(visibleCameras.map(c => c.id));
-  const visibleHistory = history.filter(h => allowedCameraIds.has(h.cameraId));
-  const visibleTrucks = truckSessions.filter(t => allowedCameraIds.has(t.line));
+  const visibleHistory = sourceHistory.filter(h => allowedCameraIds.has(h.cameraId));
+  const visibleTrucks = sourceTrucks.filter(t => allowedCameraIds.has(t.line));
   const summaryCameraScope = visibleCameras
     .filter(camera => selectedLineFilter === "all" || resolveMbsStation(camera.id, cameras).mbsNum === selectedLineFilter)
     .map(camera => camera.id).sort((a, b) => a - b).join(",");
@@ -141,23 +195,15 @@ export function HistoryPage() {
   useEffect(() => {
     setCaptureSummary(null);
     setSummaryUnavailable(false);
-    if (!session || !summaryCameraScope) return;
+    if (!session || !summaryCameraScope || dateRange.error) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const abort = new AbortController();
     const loadSummary = async () => {
       const params = new URLSearchParams();
       for (const id of summaryCameraScope.split(",")) params.append("camera_ids", id);
-      const now = new Date();
-      if (selectedDateFilter === "today") {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-        params.set("start_at", start.toISOString());
-        params.set("end_at", end.toISOString());
-      } else if (selectedDateFilter !== "all") {
-        const days = selectedDateFilter === "7d" ? 7 : 30;
-        params.set("start_at", new Date(now.getTime() - days * 86400000).toISOString());
-      }
+      if (dateRange.start) params.set("start_at", dateRange.start);
+      if (dateRange.end) params.set("end_at", dateRange.end);
       if (searchQuery.trim()) params.set("search", searchQuery.trim().slice(0, 500));
       try {
         const summary = await aiApi<HistorySummary>(`/inference/history-summary?${params}`, {
@@ -176,7 +222,7 @@ export function HistoryPage() {
     // Debounce typing and keep aggregate requests independent of the preview limit.
     timer = setTimeout(loadSummary, 200);
     return () => { cancelled = true; abort.abort(); clearTimeout(timer); };
-  }, [session?.token, summaryCameraScope, selectedDateFilter, searchQuery]);
+  }, [session?.token, summaryCameraScope, dateRange.start, dateRange.end, dateRange.error, searchQuery]);
 
   // Close modals on Escape key press
   useEffect(() => {
@@ -194,19 +240,7 @@ export function HistoryPage() {
   // Filtered truck cycles list
   const filteredTrucks = useMemo(() => {
     return visibleTrucks.filter((truck) => {
-      // Date filter
-      if (selectedDateFilter !== "all") {
-        const itemTime = new Date(truck.startedAt).getTime();
-        const now = Date.now();
-        if (selectedDateFilter === "today") {
-          const isToday = new Date(truck.startedAt).toDateString() === new Date().toDateString();
-          if (!isToday) return false;
-        } else if (selectedDateFilter === "7d") {
-          if (now - itemTime > 7 * 86400000) return false;
-        } else if (selectedDateFilter === "30d") {
-          if (now - itemTime > 30 * 86400000) return false;
-        }
-      }
+      if (!withinHistoryRange(truck.startedAt, dateRange)) return false;
       // Search query (truck code, plate number, driver name)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -226,24 +260,12 @@ export function HistoryPage() {
       }
       return true;
     });
-  }, [visibleTrucks, searchQuery, selectedDateFilter, selectedLineFilter, selectedStatusFilter, cameras]);
+  }, [visibleTrucks, searchQuery, dateRange, selectedLineFilter, selectedStatusFilter, cameras]);
 
   // Filtered raw frame captures list
   const filteredHistory = useMemo(() => {
     return visibleHistory.filter((item) => {
-      // Date filter
-      if (selectedDateFilter !== "all") {
-        const itemTime = new Date(item.timestamp).getTime();
-        const now = Date.now();
-        if (selectedDateFilter === "today") {
-          const isToday = new Date(item.timestamp).toDateString() === new Date().toDateString();
-          if (!isToday) return false;
-        } else if (selectedDateFilter === "7d") {
-          if (now - itemTime > 7 * 86400000) return false;
-        } else if (selectedDateFilter === "30d") {
-          if (now - itemTime > 30 * 86400000) return false;
-        }
-      }
+      if (!withinHistoryRange(item.timestamp, dateRange)) return false;
       if (searchQuery.trim()) {
         const truck = visibleTrucks.find(truck => truck.captureIds?.includes(item.id));
         const text = [item.id, item.grade, item.timestamp, cameras.find(camera => camera.id === item.cameraId)?.name, truck?.truckCode, truck?.plateNumber, truck?.driverName].join(" ").toLowerCase();
@@ -256,7 +278,7 @@ export function HistoryPage() {
       }
       return true;
     });
-  }, [visibleHistory, visibleTrucks, searchQuery, selectedDateFilter, selectedLineFilter, cameras]);
+  }, [visibleHistory, visibleTrucks, searchQuery, dateRange, selectedLineFilter, cameras]);
 
   // Summary KPIs based on filtered or active records
   const historyRecordCount = activeTab === "trucks" ? filteredTrucks.length : filteredHistory.length;
@@ -290,11 +312,14 @@ export function HistoryPage() {
   const handleResetFilters = () => {
     setSearchQuery("");
     setSelectedDateFilter("all");
+    setDateFrom(jakartaDate());
+    setDateTo(jakartaDate());
     setSelectedLineFilter("all");
     setSelectedStatusFilter("all");
   };
 
   function exportCsv() {
+    if (dateExportBlocked) return;
     const header = [
       "Timestamp",
       "Meja Tebu (MBS)",
@@ -309,7 +334,7 @@ export function HistoryPage() {
       const capGrade = normalizeGrade(row.grade);
       const curConfig = gradeDefinition(capGrade);
       return [
-        new Date(row.timestamp).toLocaleString("id-ID"),
+        new Date(row.timestamp).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
         `${station.label} (${station.subLabel})`,
         `${capGrade}`,
         curConfig.name,
@@ -322,6 +347,7 @@ export function HistoryPage() {
   }
 
   function exportTruckCsv() {
+    if (dateExportBlocked) return;
     const header = [
       "Kode Siklus / Truk",
       "Plat Armada",
@@ -345,8 +371,8 @@ export function HistoryPage() {
         row.driverName || "-",
         row.supplier || "-",
         `${station.label} (${station.subLabel})`,
-        new Date(row.startedAt).toLocaleString("id-ID"),
-        row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID") : "Aktif",
+        new Date(row.startedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
+        row.completedAt ? new Date(row.completedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : "Aktif",
         row.totalCaptures,
         `${cycleGrade(row)}`,
         `${Math.round((row.averageConfidence ?? 0) * 100)}%`,
@@ -451,7 +477,7 @@ export function HistoryPage() {
 
           <div className="stationClock">
             <Clock size={12} />
-            <span>{clock.toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+            <span>{clock.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
           </div>
 
           <button
@@ -506,6 +532,7 @@ export function HistoryPage() {
             <button
               type="button"
               className="historyExportBtn"
+              disabled={dateExportBlocked}
               onClick={activeTab === "trucks" ? exportTruckCsv : exportCsv}
               title="Download file CSV hasil rekap data ini"
             >
@@ -622,19 +649,11 @@ export function HistoryPage() {
                 <Calendar size={10} />
                 <span>RENTANG WAKTU</span>
               </label>
-              <div className="cockpitSelectWrap">
-                <select
-                  value={selectedDateFilter}
-                  onChange={(e) => setSelectedDateFilter(e.target.value as any)}
-                  className="cockpitSelect"
-                >
-                  <option value="all">Semua Waktu</option>
-                  <option value="today">Hari Ini (24 Jam)</option>
-                  <option value="7d">7 Hari Terakhir</option>
-                  <option value="30d">30 Hari Terakhir</option>
-                </select>
-                <ChevronDown size={11} className="selectChevronIcon" />
-              </div>
+              <FilterSelect label="Rentang waktu riwayat" value={selectedDateFilter} onChange={value => setSelectedDateFilter(value as HistoryDateFilter)} options={[
+                { value: "all", label: "Semua Waktu" }, { value: "today", label: "Hari Ini (WIB)" },
+                { value: "7d", label: "7 Hari Terakhir" }, { value: "30d", label: "30 Hari Terakhir" },
+                { value: "date", label: "Pilih Satu Tanggal" }, { value: "range", label: "Rentang Tanggal" }
+              ]} />
             </div>
 
             {/* 3. MBS Station Field (Meja mengikuti konfigurasi kamera) */}
@@ -643,17 +662,10 @@ export function HistoryPage() {
                 <Building2 size={10} />
                 <span>MEJA TEBU (MBS)</span>
               </label>
-              <div className="cockpitSelectWrap">
-                <select
-                  value={selectedLineFilter}
-                  onChange={(e) => setSelectedLineFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
-                  className="cockpitSelect"
-                >
-                  <option value="all">Semua Meja</option>
-                  {[1, 2, 3, 4, 5].map(line => <option key={line} value={line} disabled={!availableLines.has(line)}>MBS {line}{availableLines.has(line) ? "" : " (Tidak tersedia)"}</option>)}
-                </select>
-                <ChevronDown size={11} className="selectChevronIcon" />
-              </div>
+              <FilterSelect label="Meja tebu (MBS)" value={String(selectedLineFilter)} onChange={value => setSelectedLineFilter(value === "all" ? "all" : Number(value))} options={[
+                { value: "all", label: "Semua Meja" },
+                ...[1, 2, 3, 4, 5].map(line => ({ value: String(line), label: `MBS ${line}`, disabled: !availableLines.has(line) }))
+              ]} />
             </div>
 
             {/* 4. Status Sesi (Only on Trucks Tab) */}
@@ -663,22 +675,29 @@ export function HistoryPage() {
                   <Layers size={10} />
                   <span>STATUS SIKLUS</span>
                 </label>
-                <div className="cockpitSelectWrap">
-                  <select
-                    value={selectedStatusFilter}
-                    onChange={(e) => setSelectedStatusFilter(e.target.value)}
-                    className="cockpitSelect"
-                  >
-                    <option value="all">Semua Status</option>
-                    <option value="completed">Selesai (Completed)</option>
-                    <option value="active">Sedang Berjalan</option>
-                  </select>
-                  <ChevronDown size={11} className="selectChevronIcon" />
-                </div>
+                <FilterSelect label="Status siklus" value={selectedStatusFilter} onChange={setSelectedStatusFilter} options={[
+                  { value: "all", label: "Semua Status" }, { value: "completed", label: "Selesai" }, { value: "active", label: "Sedang Berjalan" }
+                ]} />
               </div>
             )}
           </div>
 
+          {(selectedDateFilter === "date" || selectedDateFilter === "range") && (
+            <div className="historyDateInputs">
+              <label>{selectedDateFilter === "date" ? "Tanggal (WIB)" : "Dari tanggal (WIB)"}
+                <input type="date" value={dateFrom} onChange={event => setDateFrom(event.target.value)} aria-invalid={Boolean(dateRange.error)} />
+              </label>
+              {selectedDateFilter === "range" && <label>Sampai tanggal (WIB)
+                <input type="date" value={dateTo} min={dateFrom || undefined} onChange={event => setDateTo(event.target.value)} aria-invalid={Boolean(dateRange.error)} />
+              </label>}
+              <span>Termasuk seluruh hari yang dipilih. Siklus difilter berdasarkan waktu mulai.</span>
+            </div>
+          )}
+          {(dateRange.error || dateLoadError || (scopedDates && dateLoading)) && (
+            <p className="historyDateFeedback" role={dateRange.error || dateLoadError ? "alert" : "status"}>
+              {dateRange.error || dateLoadError || "Memuat riwayat sesuai tanggal..."}
+            </p>
+          )}
           {/* Active Filter Chips Console (Bottom Strip) */}
           {hasActiveFilters && (
             <div className="historyActiveFiltersRow">
@@ -694,7 +713,7 @@ export function HistoryPage() {
               {selectedDateFilter !== "all" && (
                 <span className="historyFilterChip">
                   <span>
-                    Waktu: {selectedDateFilter === "today" ? "Hari Ini" : selectedDateFilter === "7d" ? "7 Hari" : "30 Hari"}
+                    Waktu: {dateRange.label}
                   </span>
                   <button type="button" onClick={() => setSelectedDateFilter("all")} title="Hapus filter waktu">
                     <X size={11} />
@@ -775,9 +794,9 @@ export function HistoryPage() {
                   <tbody style={compactLayout ? { gridTemplateRows: `repeat(${historyPageSize}, minmax(0, 1fr))` } : undefined}>
                     {pagedTrucks.map((row) => {
                       const gradeCode = cycleGrade(row);
-                      const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                      const startTime = new Date(row.startedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
                       const endTime = row.completedAt
-                        ? new Date(row.completedAt).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                        ? new Date(row.completedAt).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
                         : null;
 
                       const durationMinutes = row.completedAt
@@ -825,11 +844,13 @@ export function HistoryPage() {
                             })()}
                           </td>
                           <td>
+                            <span className="historyDateStamp">{new Date(row.startedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}</span>
                             <span className="timeText">{startTime}</span>
                           </td>
                           <td>
                             {endTime ? (
                               <div className="endTimeWrap">
+                                <span className="historyDateStamp">{new Date(row.completedAt!).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}</span>
                                 <span className="timeText">{endTime}</span>
                                 {durationMinutes && <span className="durationBadge">({durationMinutes}m)</span>}
                               </div>
@@ -958,8 +979,9 @@ export function HistoryPage() {
                             </div>
                           </td>
                           <td>
+                            <span className="historyDateStamp">{new Date(row.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}</span>
                             <span className="timeText">
-                              {new Date(row.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                              {new Date(row.timestamp).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                             </span>
                           </td>
                           <td>
@@ -1059,12 +1081,12 @@ export function HistoryPage() {
         const curConfig = gradeDefinition(capGrade);
         const confPct = Math.round((selectedCapture.confidence ?? 0) * 100);
         const station = resolveMbsStation(selectedCapture.cameraId, cameras);
-        const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", {
+        const dateStr = new Date(selectedCapture.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta",
           day: "2-digit",
           month: "2-digit",
           year: "numeric"
         });
-        const timeStr = new Date(selectedCapture.timestamp).toLocaleTimeString("id-ID", { hour12: false,
+        const timeStr = new Date(selectedCapture.timestamp).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour12: false,
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit"

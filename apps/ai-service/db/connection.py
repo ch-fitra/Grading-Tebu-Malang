@@ -27,7 +27,7 @@ for key, value, expected in [("DATABASE_URL", PRIMARY_DB_URL, "sugarcane_malang"
 def get_ai_db_connection():
     """Returns a connection to the dedicated sugarcane_ai database."""
     try:
-        conn = psycopg2.connect(AI_DB_URL)
+        conn = psycopg2.connect(AI_DB_URL, connect_timeout=5)
         return conn
     except Exception as e:
         logger.error(f"Gagal terhubung ke database sugarcane_ai: {e}")
@@ -37,7 +37,7 @@ def get_ai_db_connection():
 def get_auth_db_connection():
     """Returns a connection to the primary sugarcane database (for Auth/Users lookup)."""
     try:
-        conn = psycopg2.connect(PRIMARY_DB_URL)
+        conn = psycopg2.connect(PRIMARY_DB_URL, connect_timeout=5)
         return conn
     except Exception as e:
         logger.error(f"Gagal terhubung ke database auth sugarcane: {e}")

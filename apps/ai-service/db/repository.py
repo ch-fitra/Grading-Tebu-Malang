@@ -137,16 +137,16 @@ class AIRepository:
                     detections = {row["snapshot_path"]: row for row in cursor.fetchall()}
             for item in items:
                 detection = detections.get((item["snapshot"] or "").lstrip("/"))
-                if detection and detection["detected_class"] in ("S", "M", "A", "D", "B", "T", "G", "X"):
+                if detection and detection["detected_class"] in ("ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar", "S", "M", "A", "D", "B", "T", "G", "X"):
                     item["grade"] = detection["detected_class"]
-                    if not any(key in detection["classes_score"] for key in ("daun", "pucuk", "sampah")):
+                    if not any(key in (detection["classes_score"] or {}) for key in ("daun", "pucuk", "sampah")):
                         item["classScores"] = detection["classes_score"]
         return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
 
     @staticmethod
     def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
         try:
-            with get_auth_db_connection() as conn:
+            with closing(get_auth_db_connection()) as conn, conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("SELECT u.id, u.username, u.password_hash, r.code as role FROM app_users u JOIN roles r ON r.id = u.role_id WHERE u.username = %s AND u.active = true", (username,))
                     res = cursor.fetchone()
@@ -180,7 +180,7 @@ class AIRepository:
     @staticmethod
     def get_active_cameras() -> List[Dict[str, Any]]:
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("SELECT * FROM ai_cameras WHERE is_active = true ORDER BY id ASC")
                     return [dict(r) for r in cursor.fetchall()]
@@ -191,7 +191,7 @@ class AIRepository:
     @staticmethod
     def get_camera_roi(camera_id: int) -> Optional[Dict[str, Any]]:
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     cursor.execute("SELECT roi_config FROM ai_cameras WHERE id = %s", (camera_id,))
                     res = cursor.fetchone()
@@ -203,7 +203,7 @@ class AIRepository:
     @staticmethod
     def update_camera_roi(camera_id: int, roi_config: Dict[str, Any]) -> bool:
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
                         "UPDATE ai_cameras SET roi_config = %s, updated_at = NOW() WHERE id = %s",
@@ -278,7 +278,7 @@ class AIRepository:
         if not cycle_code:
             cycle_code = f"CYC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     # Ensure camera_id exists
                     cursor.execute("""
@@ -302,7 +302,7 @@ class AIRepository:
     @staticmethod
     def stop_cycle(cycle_code: str) -> Optional[Dict[str, Any]]:
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                     # Resolve active running cycle if cycle_code matches exact code or camera_id string or latest running cycle
                     cursor.execute("""
@@ -376,7 +376,7 @@ class AIRepository:
         captured_at: Optional[str] = None
     ) -> Optional[int]:
         try:
-            with get_ai_db_connection() as conn:
+            with closing(get_ai_db_connection()) as conn, conn:
                 with conn.cursor() as cursor:
                     # Auto-link to active running cycle if cycle_code was not explicitly supplied
                     if not cycle_code:

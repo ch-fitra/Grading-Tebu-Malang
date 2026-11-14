@@ -2,7 +2,7 @@ import { usePanelSize } from "../hooks/usePanelSize";
 import { frameNumbers, dominantGrade, meanClassScores, frameGradeDistribution, storedClassProbability } from "../utils/grade-data";
 import { findStationCamera } from "../utils/stations";
 import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { useAppStore } from "../store";
 import { InferenceResult, Grade } from "../types";
 import { api, aiApi, backendUrl, getCameraStreamUrl } from "../utils/api";
@@ -14,7 +14,7 @@ type AutoCycleStatus = {
   camera_id: number;
   enabled: boolean;
   model_available: boolean;
-  detection_region?: "incoming" | "full_frame";
+  detection_region?: "incoming" | "model_roi" | "full_frame";
   phase: "off" | "waiting_full" | "confirming" | "starting" | "grading" | "finishing" | "waiting_clear" | "camera_unavailable" | "uncertain" | "error";
   confirmed_seconds: number;
   confirmation_seconds: number;
@@ -167,46 +167,29 @@ export function DashboardPage() {
   const [capturing, setCapturing] = useState(false);
   const [captureFeedback, setCaptureFeedback] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const streamCanvasRef = useRef<HTMLDivElement>(null);
+  const streamCanvasRef = useRef<HTMLDialogElement>(null);
+  const fullViewButtonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      const fsElement = document.fullscreenElement || (document as any).webkitFullscreenElement;
-      setIsFullscreen(Boolean(fsElement));
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-    };
-  }, []);
-
-  const toggleFullscreen = async () => {
-    try {
-      if (!isFullscreen) {
-        if (streamCanvasRef.current?.requestFullscreen) {
-          await streamCanvasRef.current.requestFullscreen();
-        } else if ((streamCanvasRef.current as any)?.webkitRequestFullscreen) {
-          await (streamCanvasRef.current as any).webkitRequestFullscreen();
-        } else {
-          setIsFullscreen(true);
-        }
-      } else {
-        if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
-          if (document.exitFullscreen) {
-            await document.exitFullscreen();
-          } else if ((document as any).webkitExitFullscreen) {
-            await (document as any).webkitExitFullscreen();
-          }
-        } else {
-          setIsFullscreen(false);
-        }
-      }
-    } catch {
-      setIsFullscreen((prev) => !prev);
+  // A modal dialog fills only the browser/Electron viewport. Keeping the same
+  // video node in the top layer avoids reconnecting or duplicating MJPEG streams.
+  useLayoutEffect(() => {
+    const canvas = streamCanvasRef.current;
+    if (!canvas) return;
+    if (isFullscreen) {
+      canvas.close();
+      canvas.showModal();
+      const previousOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => { document.body.style.overflow = previousOverflow; };
     }
-  };
+    if (canvas.matches(":modal")) {
+      canvas.close();
+      canvas.setAttribute("open", "");
+      fullViewButtonRef.current?.focus();
+    }
+  }, [isFullscreen]);
+
+  const toggleFullscreen = () => setIsFullscreen(previous => !previous);
 
   const currentFactory = useMemo(() => ({
     id: "kebonagung",
@@ -690,10 +673,14 @@ export function DashboardPage() {
   const confidence = effectiveInference?.confidence ?? 0;
   const grade = effectiveInference?.grade;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
+  const confidenceThreshold = status?.ai.model?.confidence_threshold;
+  const isHistoryAggregate = !activeCycle && !selectedCycle && cycleModelFrames.length > 0;
+
 
   const distributionFrames = activeCycle ? activeCycleFrames : cycleModelFrames;
   const gradeDistribution = frameGradeDistribution(distributionFrames, KEBONAGUNG_GRADES.map(item => item.code))
     .map((result, index) => ({ ...KEBONAGUNG_GRADES[index], ...result }));
+
 
   // Statistik Konsistensi Siklus Meja Tebu (11 Kelas Malang)
   const cycleConsistency = useMemo(() => {
@@ -919,8 +906,11 @@ export function DashboardPage() {
                 <button
                   type="button"
                   className="stStreamBtn"
+                  ref={fullViewButtonRef}
                   onClick={toggleFullscreen}
-                  title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                  aria-label="Perbesar kamera di dalam jendela"
+                  aria-expanded={isFullscreen}
+                  title="Perbesar kamera di dalam jendela"
                 >
                   {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
                 </button>
@@ -928,7 +918,9 @@ export function DashboardPage() {
             </div>
 
             {/* Video area */}
-            <div className={`streamVideoArea ${isFullscreen ? "fullscreenMode" : ""}`} ref={streamCanvasRef}
+            <dialog open className={`streamVideoArea cameraViewportDialog ${isFullscreen ? "fullscreenMode" : ""}`} ref={streamCanvasRef}
+              aria-label={`Kamera MBS ${activeLine}`} aria-modal={isFullscreen || undefined}
+              onCancel={event => { event.preventDefault(); setIsFullscreen(false); }}
               style={!isFullscreen ? { aspectRatio: streamDimensions && streamDimensions.cameraId === targetCameraId ? `${streamDimensions.width} / ${streamDimensions.height}` : "16 / 9" } : undefined}>
               {targetCameraId && isStreaming ? (
                 <div className="streamVideoContainer">
@@ -952,12 +944,7 @@ export function DashboardPage() {
                   <div className="streamOverlayTag">
                     {currentFactory.shortName} • MBS {activeLine}
                   </div>
-                  {isFullscreen && (
-                    <button type="button" className="fullscreenExitFloatingBtn" onClick={toggleFullscreen}>
-                      <Minimize2 size={15} />
-                      <span>Keluar Full View</span>
-                    </button>
-                  )}
+
                 </div>
               ) : (
                 <div className="noStreamPlaceholder">
@@ -977,7 +964,13 @@ export function DashboardPage() {
                   )}
                 </div>
               )}
-            </div>
+              {isFullscreen && <header className="cameraFullViewHeader">
+                <span><Radio size={14} aria-hidden="true" /> {currentFactory.shortName} - MBS {activeLine}</span>
+                <button type="button" className="cameraFullViewClose" onClick={() => setIsFullscreen(false)} aria-label="Tutup tampilan penuh kamera" autoFocus>
+                  <X size={18} aria-hidden="true" /><span>Tutup</span>
+                </button>
+              </header>}
+            </dialog>
 
             {isAdmin ? (
               /* ─── Mode Pengawasan Mutu & Tata Kelola Direksi (Style Platform PG Kebon Agung) ─── */
@@ -1042,7 +1035,7 @@ export function DashboardPage() {
                       <button type="button" className="cycleAutoButton" aria-pressed={autoEnabled}
                         disabled={!canInspect || !targetCameraId || !currentAutoMode || autoModeBusy || (!autoEnabled && (!currentAutoMode.model_available || Boolean(activeCycle)))}
                         onClick={handleToggleAuto}
-                        title={autoEnabled ? "Matikan Auto dan simpan siklus yang sedang berjalan" : currentAutoMode?.detection_region === "incoming" ? "Aktifkan grading otomatis saat tebu memenuhi ROI masuk selama 3 detik" : "Aktifkan pemindaian otomatis saat tebu memenuhi seluruh frame"}>
+                        title={autoEnabled ? "Matikan Auto dan simpan siklus yang sedang berjalan" : currentAutoMode?.detection_region === "incoming" ? "Aktifkan grading otomatis saat tebu memenuhi ROI masuk selama 3 detik" : currentAutoMode?.detection_region === "model_roi" ? "Aktifkan grading otomatis saat area meja pada model penuh selama 3 detik" : "Aktifkan pemindaian otomatis saat tebu memenuhi seluruh frame"}>
                         {autoModeBusy ? "Memproses..." : autoEnabled ? "Auto Aktif" : "Aktifkan Auto"}
                         <span className="cycleAutoSwitch" aria-hidden="true" />
                       </button>
@@ -1548,7 +1541,7 @@ export function DashboardPage() {
                         {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
                       <span className="photoConf">
-                        Conf: {Math.round(item.confidence * 100)}%
+                        Conf: {Math.round(item.confidence * 100)}%{confidenceThreshold !== undefined && item.confidence < confidenceThreshold ? " (rendah)" : ""}
                       </span>
                     </div>
                   </button>
@@ -1624,7 +1617,7 @@ export function DashboardPage() {
                     </strong>
                   </div>
                   <div className="catKpi">
-                    <span className="catKpiLabel">AI Confidence</span>
+                    <span className="catKpiLabel">{isHistoryAggregate ? "Rerata Confidence Riwayat" : effectiveInference && "cycleFrameCount" in effectiveInference ? "Rerata Confidence Siklus" : "AI Confidence"}</span>
                     <strong className="catKpiValue blue">
                       {hasLatestInference ? `${(gradeConf * 100).toFixed(1)}` : "—"}
                       <span className="catKpiUnit">%</span>
@@ -1648,7 +1641,7 @@ export function DashboardPage() {
                   <div className="catGradeInfo">
                     <span className="catGradeLabel">
                       <Activity size={10} />
-                      <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `DOMINAN (${effectiveInference.cycleFrameCount} FRAME)` : "PREDICTED GRADE"}</span>
+                      <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `${isHistoryAggregate ? "DOMINAN RIWAYAT" : "DOMINAN"} (${effectiveInference.cycleFrameCount} FRAME)` : "KANDIDAT MODEL"}</span>
                     </span>
                     <div className={`catGradeValue grade-${normalizeGrade(grade).toLowerCase()}`}>
                       {hasLatestInference ? normalizeGrade(grade) : "—"}
@@ -1663,9 +1656,9 @@ export function DashboardPage() {
                 <div className="catDivider" />
 
                 {/* Distribution of selected frame labels, not model probabilities. */}
-                <div className="catMetricsTitle">
+              <div className="catMetricsTitle">
                   <TrendingUp size={11} />
-                  <span>Distribusi Kelas Berdasarkan Frame</span>
+                  <span>{isHistoryAggregate ? "Distribusi Kelas Riwayat" : "Distribusi Kelas Berdasarkan Frame"}</span>
                 </div>
                 <div className="catGradeProbList">
                   {gradeDistribution.map((item) => (

@@ -6,24 +6,22 @@ otomatis yang sedang berjalan, lalu membuka kontrol manual.
 
 Alur per kamera:
 
-1. Model dipilih melalui `models/active/frame_config.json`. Model aktif sekarang
-   `model_frame_sugarcane_malang.keras`, dengan `frame_input: embedded_roi`. Model
-   menerima **frame asli penuh** dan memotong area masuk sendiri lewat layer
-   `hoist_roi`: atas 11, bawah 132, kiri 23, kanan 146 pada input 224 x 224.
-   Area internal ini kira-kira x=10,3%-34,8%, y=4,9%-41,1% dari frame penuh.
-   Layanan tidak melakukan crop tambahan agar area tidak terpotong dua kali.
-   Untuk model tanpa crop internal, gunakan `frame_input: incoming_roi`.
-   Dalam mode tersebut model membaca **ROI tebu masuk** jika
-   `incoming.enabled=true` pada konfigurasi ROI kamera. Untuk Meja Tebu 2, area ini
-   berupa trapesium putih di sisi kiri sesuai gambar referensi. Crop berasal dari
-   frame asli tanpa overlay; piksel di luar poligon dibuang dengan mask hitam.
-   Kamera tanpa ROI masuk aktif tetap membaca seluruh frame asli.
-   Indeks 0 = `full_frame_sugarcane`, indeks 1 = `not_full_frame`.
+1. Model dipilih melalui `models/active/frame_config.json`: model aktif
+   `model_frame_sugarcane.keras`, dengan `frame_input: embedded_roi`.
+   Model menerima **frame asli penuh**, lalu layer `crop_table` memotong input
+   224 x 224: atas 25, bawah 29, kiri 95, kanan 34. Area yang dibaca adalah
+   meja, kira-kira x=42,4%-84,8%, y=11,2%-87,1% dari gambar penuh.
+   Jangan melakukan crop ROI masuk sebelum inferensi model ini: crop internal
+   akan diterapkan pada potongan yang salah. ROI masuk putih pada overlay
+   bukan area pemicu model aktif ini. Model tanpa crop internal dapat memakai
+   `frame_input: incoming_roi` untuk membaca ROI masuk dari aplikasi.
+   Indeks 0 = `full_frame_sugarcane`, indeks 1 = `not_full_frame` mengikuti
+   konfigurasi; urutan ini masih perlu dicocokkan dengan metadata pelatihan.
 2. Area deteksi harus terkonfirmasi penuh tebu terus-menerus selama **3 detik**. Prediksi tidak
    meyakinkan, kamera terputus, atau jeda frame lebih dari 1,5 detik mereset konfirmasi.
 3. Siklus grading menggunakan model aktif yang sudah ada
    (`model_sugarcane_malang.keras` secara default), dengan pengaturan ROI grading sebelumnya.
-   Akuisisi dijadwalkan sekali per detik selama **30 detik**. Slot yang tertinggal
+   Akuisisi dijadwalkan sekali per detik selama **50 detik**. Slot yang tertinggal
    dilewati; jumlah frame dapat berkurang jika inferensi lambat atau kamera terputus.
    Tidak ada inferensi grading baru setelah deadline; penyimpanan frame yang sedang
    diproses dapat selesai sesudahnya.
@@ -39,7 +37,7 @@ tertanam di model), dan softmax pada dua output logits. Ambang keyakinan awal ad
 dengan rekaman kamera lapangan; pengujian perangkat lunak bukan evaluasi akurasi model.
 Model grading dan frame disimpan dalam cache terpisah.
 
-Model baru sudah berhasil dimuat dan diuji inferensi sintetis. Akurasi lapangan
+Model aktif sudah berhasil dimuat dan diuji inferensi. Akurasi lapangan
 belum diukur. Urutan kelas tetap mengikuti konfigurasi sebelumnya (indeks 0 penuh,
 indeks 1 tidak penuh); cocokkan dengan urutan label saat pelatihan model baru.
 Validasi dengan rekaman area kosong dan tebu masuk diperlukan untuk menilai ambang
@@ -61,7 +59,7 @@ Klien lama yang menyimpan ROI tanpa field `incoming` mempertahankan area masuk.
 Untuk memeriksa crop tanpa menjalankan grading, gunakan
 `GET /api/cameras/{id}/snapshot?roi_target=incoming` melalui autentikasi aplikasi.
 Endpoint mengembalikan 422 jika ROI masuk tidak tersedia atau dinonaktifkan.
-Status Auto mengembalikan `detection_region` (`incoming` atau `full_frame`).
+Status Auto mengembalikan `detection_region` (`incoming`, `model_roi`, atau `full_frame`).
 Jalankan `.venv\Scripts\python.exe scripts/test-incoming-roi.py` untuk pengujian
 geometri, overlay, pemilihan crop dan pemicu siklus tanpa kamera.
 

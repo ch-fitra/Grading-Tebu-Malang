@@ -1,4 +1,5 @@
 import "./env.js";
+import { parseHistoryQuery } from "./history-query.js";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
@@ -759,9 +760,10 @@ app.get("/api/inference/latest", async () => {
   return store.latestInference();
 });
 
-app.get("/api/inference/history", async () => {
-  await store.syncModelCaptures().catch(() => {});
-  return store.listInference();
+app.get("/api/inference/history", async (request) => {
+  const range = parseHistoryQuery(request.query);
+  if (!range.offset) await store.syncModelCaptures().catch(() => {});
+  return store.listInference(range);
 });
 
 app.get("/api/inference/model-frames", async () => {
@@ -786,8 +788,8 @@ app.delete("/api/inference", async (request, reply) => {
 });
 
 const truckInput = z.object({ truckCode: z.string().trim().min(1).max(100), plateNumber: z.string().max(30).optional(), driverName: z.string().max(100).optional(), supplier: z.string().max(150).optional(), line: z.number().int().positive(), notes: z.string().max(2000).optional() });
-app.get("/api/truck-inspections", async () => {
-  return trucks.list();
+app.get("/api/truck-inspections", async (request) => {
+  return trucks.list(parseHistoryQuery(request.query));
 });
 app.post("/api/truck-inspections", async (request, reply) => {
   const actor = (await currentUser(request.headers.authorization))!;
