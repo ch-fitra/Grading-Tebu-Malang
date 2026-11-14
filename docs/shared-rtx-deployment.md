@@ -1,7 +1,7 @@
 # Shared RTX deployment: Malang and Trangkil
 
 Changes are local; no server environment, database, or running service was changed.
-Both repositories have the same inference_device.py and tests. Commit/push each repository separately.
+Both repositories have the same inference_device.py. Commit/push each repository separately.
 
 ## Server deployment, one installation at a time
 
@@ -39,7 +39,3 @@ Restart with the target installation's launcher. Check AI /health `execution.tor
 Repeat for the other installation only after the first works. Verify both models, concurrent cycles, latency, VRAM, temperature and retained history. GPU acceleration does not migrate OpenCV CPU video decode/JPEG encoding, browser, API, or database work and does not guarantee lower laptop temperature.
 
 Rollback: stop target while idle, set AI_DEVICE=cpu and restart its own launcher. CUDA-enabled Torch can also run on CPU; package downgrade is not required for this configuration rollback.
-
-## Local validation
-
-`python scripts/test-inference-device.py` uses mocks and no database/GPU. Python syntax was checked for both main modules. Real CUDA, Keras model execution, GPU memory use and simultaneous server performance require validation on the RTX server and are not claimed by unit tests.

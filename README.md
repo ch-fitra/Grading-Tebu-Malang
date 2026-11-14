@@ -66,9 +66,6 @@ Route Cloudflare/DNS harus diatur pada akun pemilik domain; konfigurasi lokal ti
 
 - `npm run typecheck`: pemeriksaan TypeScript API, web dan desktop.
 - `npm run build`: build ketiga workspace.
-- `npm run test:malang`: integrasi database, login/logout, pemisahan cookie/origin, dan penolakan database Trangkil; port API 4111 harus kosong. Test menghentikan proses API miliknya sendiri.
-- `npm run test:ai`: pemuatan dua model dan pemetaan/persistensi ROI pada database Malang, tanpa membuka kamera.
-- `npm run test:runtime`: start/stop Windows dan gateway/WebSocket; kamera Malang dinonaktifkan sementara lalu dipulihkan, tanpa membuka RTSP atau tunnel. Jalankan saat instalasi idle.
 - `npm run check:ready`: koneksi database dan health API/AI/gateway Malang yang sedang berjalan.
 
 ## Batas validasi

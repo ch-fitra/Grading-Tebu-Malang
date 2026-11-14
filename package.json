@@ -19,16 +19,12 @@
     "build": "npm run build -w @sugarcane/api && npm run build -w @sugarcane/web && npm run build -w @sugarcane/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check:ready": "node scripts/check-malang.mjs",
-    "test:cameras": "node scripts/test-camera-config.mjs",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:migrate": "npm run db:migrate -w @sugarcane/api",
-    "test:malang": "node scripts/test-malang.mjs",
     "start:malang": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-malang.ps1",
     "stop:malang": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-malang.ps1",
-    "db:setup": "node scripts/setup-malang-db.mjs",
-    "test:ai": ".venv\\Scripts\\python.exe scripts/test-malang-ai.py",
-    "test:runtime": "node scripts/test-runtime.mjs"
+    "db:setup": "node scripts/setup-malang-db.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
