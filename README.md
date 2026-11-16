@@ -70,7 +70,7 @@ Route Cloudflare/DNS harus diatur pada akun pemilik domain; konfigurasi lokal ti
 
 ## Batas validasi
 
-Panduan gambar dan kebijakan rafaksi diwarisi sebagai **referensi**, belum menjadi SOP QC Malang yang terkonfirmasi. Model menghasilkan enam kelas A/B/D/G/M/T, UI mendukung delapan kode; S/X tidak otomatis menjadi output model ini. Format Excel Malang perlu dicocokkan dengan parser/template yang tersedia. Badge pabrik adalah identitas teks sementara, bukan klaim logo resmi.
+Model grading Malang menggunakan 11 kelas sesuai konfigurasi model aktif: ATPSD, Akar Tanah, Daduk, Kocok Air, MBS, MBS Bintang, MBS Plus, Non MBS, Sogolan Pucuk, Tebu Muda, dan Terbakar. Skor classifier belum merupakan persentase kemiripan visual terkalibrasi. Format Excel Malang perlu dicocokkan dengan parser/template yang tersedia.
 
 Backup `backup/malang` tetap utuh dan pasif. ZIP lama membawa dua pabrik dan pemetaan meja tidak konsisten, sehingga tidak dipulihkan menyeluruh. Backup perubahan lokal tersimpan di `.deploy/before-malang-*`. Deployment CI Malang hanya workflow manual validasi build, tidak menyasar runner atau direktori produksi Trangkil.
 

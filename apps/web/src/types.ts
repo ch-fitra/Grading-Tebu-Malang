@@ -1,5 +1,5 @@
-// Legacy codes remain readable in saved history. New detections use the Malang labels.
-export type Grade = "ATPSD" | "Akar Tanah" | "Daduk" | "Kocok Air" | "MBS" | "MBS Bintang" | "MBS Plus" | "Non MBS" | "Sogolan Pucuk" | "Tebu Muda" | "Terbakar" | "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
+// Class names follow the active Malang model configuration.
+export type Grade = string;
 
 export type InferenceResult = {
   impurityMeasured?: boolean;
@@ -9,6 +9,9 @@ export type InferenceResult = {
   cameraId: number;
   classes: { daun: number; pucuk: number; sampah: number };
   classScores?: Partial<Record<Grade, number>>;
+  candidateGrade?: Grade;
+  predictionAccepted?: boolean;
+  confidenceThreshold?: number;
   grade: Grade;
   confidence: number;
   snapshot: string | null;

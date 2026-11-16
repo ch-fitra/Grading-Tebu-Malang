@@ -31,7 +31,7 @@ from fastapi import FastAPI, HTTPException, Query, Response, Header, Request as 
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from streamer import (
     DEFAULT_ROIS,
@@ -46,6 +46,7 @@ from streamer import (
 from db.migrations import run_ai_migrations
 from db.repository import AIRepository
 from auto_cycle import AutoCycleController
+from grading_policy import UNKNOWN_GRADE, accepted_grade
 
 try:
     import onnxruntime as ort
@@ -160,6 +161,15 @@ class ModelConfig(BaseModel):
     model_path: str = "models/active/model.onnx"
     frame_input: Literal["incoming_roi", "embedded_roi"] = "incoming_roi"
 
+    @field_validator("classes")
+    @classmethod
+    def unique_classes(cls, names):
+        if any(not name.strip() or name != name.strip() for name in names) or len(set(names)) != len(names):
+            raise ValueError("Nama kelas harus unik, tidak kosong, dan tanpa spasi tepi")
+        if any(name in (UNKNOWN_GRADE, "Perlu Pemeriksaan") for name in names):
+            raise ValueError("Status pengenalan bukan label dataset")
+        return names
+
 
 class CameraRegisterPayload(BaseModel):
     camera_id: int
@@ -249,6 +259,8 @@ class ActivateModelPayload(BaseModel):
 def activate_model(payload: ActivateModelPayload):
     config = load_config().model_copy(update=payload.model_dump())
     model_session(config)  # Validate the file before changing active configuration.
+    # Loading a file alone does not validate its output or preprocessing contract.
+    run_onnx_inference(np.zeros((config.input_size, config.input_size, 3), dtype=np.uint8), config)
     temporary = CONFIG_PATH.with_name(f"config.{uuid4().hex}.tmp")
     try:
         temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
@@ -277,6 +289,8 @@ def classification_measurement(output: np.ndarray, config: ModelConfig) -> Tuple
         arr = 1.0 / (1.0 + np.exp(-np.clip(arr, -80, 80)))
     elif arr.min() < 0 or arr.max() > 1:
         raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
+    if config.output_activation == "probabilities" and not np.isclose(arr.sum(), 1.0, atol=1e-4):
+        raise HTTPException(status_code=422, detail="Probabilitas klasifikasi harus berjumlah 1; gunakan kontrak sigmoid untuk output independen")
     
     # Scale to percentage (0.0 - 100.0%)
     classes = {name: float(prob) * 100 for name, prob in zip(config.classes, arr)}
@@ -314,20 +328,78 @@ def measurement_result(classes: Dict[str, float], config: ModelConfig) -> Tuple[
                   if grade in config.classes}
         if not scores:
             raise HTTPException(status_code=422, detail="Model grading tidak menghasilkan kelas mutu yang dikenali")
-        return scores, None, max(scores, key=scores.get), False
-    if not all(name in classes for name in ("daun", "pucuk", "sampah")):
-        raise HTTPException(status_code=422, detail="Model segmentasi harus memiliki kelas daun, pucuk, dan sampah")
-    scores = {name: round(float(classes[name]), 2) for name in ("daun", "pucuk", "sampah")}
-    total = round(sum(scores.values()), 2)
-    grade = ("X" if scores["sampah"] > 15 or total > 35 else "G" if total > 20
-             else "B" if total > 15 else "D" if total > 10 else "A" if total > 5
-             else "M" if total > 2 else "S")
-    return scores, total, grade, True
+        candidate = max(scores, key=scores.get)
+        grade = accepted_grade(candidate, scores[candidate] / 100, config.threshold)
+        return scores, None, grade, False
+    raise HTTPException(status_code=422, detail="Grading Malang memerlukan hasil klasifikasi sesuai kelas model aktif")
 
 
 def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
     with _inference_lock:
         return _run_model_inference(image, config)
+
+
+def keras_input_pixels(image, config):
+    """Shared by live classification and offline embedding evaluation (BGR crop in)."""
+    pixels = np.asarray(image)
+    if pixels.ndim != 3 or pixels.shape[2] != 3 or not pixels.size or pixels.dtype != np.uint8:
+        raise ValueError("Input Keras harus gambar BGR uint8 [tinggi, lebar, 3], rentang 0-255")
+    resized = cv2.resize(image, (config.input_size, config.input_size))
+    if config.input_color == "rgb":
+        resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    # Active Keras model owns Rescaling; do not normalize a second time.
+    return np.expand_dims(resized.astype("float32"), axis=0)
+
+
+def validate_keras_classification_contract(model, config):
+    """Validate executable shape/activation, not the unavailable training label order."""
+    expected_input = (None, config.input_size, config.input_size, 3)
+    if tuple(model.input_shape) != expected_input:
+        raise ValueError(f"Input model {model.input_shape} tidak sesuai kontrak NHWC {expected_input}")
+    if tuple(model.output_shape) != (None, len(config.classes)):
+        raise ValueError("Jumlah output checkpoint tidak sesuai seluruh kelas konfigurasi")
+    activation = getattr(getattr(model.layers[-1], "activation", None), "__name__", None)
+    if config.output_activation in ("softmax", "sigmoid") and activation not in (None, "linear"):
+        raise ValueError("Aktivasi output sudah berada di model; menambah aktivasi layanan akan mengubah skor")
+
+
+@lru_cache(maxsize=8)
+def _keras_feature_probe(model, device):
+    """Reuse the same learned tensors. No new weights, reference prototypes, or training."""
+    import keras
+    last = model.layers[-1]
+    if not isinstance(last, keras.layers.Dense) or len(last.input.shape) != 2:
+        raise ValueError("Checkpoint tidak mengekspos vektor fitur sebelum Dense klasifikasi")
+    with keras.device(device):
+        return keras.Model(model.inputs, [last.input, model.output])
+
+
+def keras_raw_inference(image, config, include_features=False):
+    """Actual pre-softmax output and optional penultimate features, never similarity.
+
+    The final Dense columns are discriminative classifier weights, not verified
+    class-image references. Extracting features alone cannot create a matching %.
+    """
+    import keras
+    with _inference_lock:
+        model = model_session(config)
+        if config.type == "classification":
+            validate_keras_classification_contract(model, config)
+        device = torch_device()
+        runner = _keras_feature_probe(model, device) if include_features else model
+        tensor = torch.as_tensor(keras_input_pixels(image, config), device=device)
+        # .to('cpu') alone does not force Keras execution to CPU on a CUDA host.
+        with keras.device(device), torch.no_grad():
+            output = runner(tensor, training=False)
+        if include_features:
+            features, output = output
+            features = features.detach().cpu().numpy()
+            if features.ndim != 2 or features.shape[0] != 1 or not np.isfinite(features).all():
+                raise ValueError("Vektor fitur model tidak valid")
+        raw = output.detach().cpu().numpy()
+        if not np.isfinite(raw).all():
+            raise ValueError("Output checkpoint tidak finite")
+        return (raw, features) if include_features else raw
 
 
 def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
@@ -336,16 +408,7 @@ def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tupl
     # If model is .keras / .h5, handle via Keras runner
     if path.suffix.lower() in [".keras", ".h5"]:
         try:
-            keras_model = model_session(config)
-            resized = cv2.resize(image, (config.input_size, config.input_size))
-            if config.input_color == "rgb":
-                resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            tensor = np.expand_dims(resized.astype("float32"), axis=0)
-            tensor = torch.as_tensor(tensor, device=torch_device())
-            with torch.no_grad():
-                preds = keras_model(tensor, training=False)
-                if hasattr(preds, "detach"):
-                    preds = preds.detach().cpu().numpy()
+            preds = keras_raw_inference(image, config)
             if config.type == "classification":
                 return classification_measurement(preds, config)
             return segmentation_measurement(preds, config)
@@ -376,7 +439,8 @@ def health():
         "service": "ai-service",
         "execution": execution_status(),
         "installation": "malang",
-        "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file()},
+        "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file(),
+                         "independent_visual_similarity": False},
         "model": {
             "name": config.name,
             "version": config.version,
@@ -385,6 +449,10 @@ def health():
             "output_activation": config.output_activation,
             "input_color": config.input_color,
             "class_order_source": "configuration_only",
+            "classes": config.classes,
+            "score_kind": "classification_probability" if config.type == "classification" else "segmentation_area",
+            "similarity_calibration_available": False,
+            "similarity_unavailable_reason": "Checkpoint classifier tidak menyertakan bank referensi fitur per kelas atau kalibrasi kemiripan",
             "available": configured_model_path(config).is_file() and (configured_model_path(config).suffix.lower() in (".keras", ".h5") or ort is not None),
         },
         "cameras": {str(camera_id): {"live": stream.is_connected and time.time() - stream.last_frame_time < 4.0,
@@ -898,12 +966,26 @@ def infer(payload: InferRequest):
         "cycle_code": payload.cycle_code,
         "classes": mapped_scores,
         "detected_class": detected_class,
-        "detected_class_index": config.classes.index(detected_class) if config.type == "classification" else None,
+        "candidate_class": max(mapped_scores, key=mapped_scores.get) if config.type == "classification" else detected_class,
+        "prediction_accepted": detected_class != UNKNOWN_GRADE,
+        "confidence_threshold": config.threshold,
+        "detected_class_index": config.classes.index(detected_class) if detected_class in config.classes else None,
         "model_sha256": model_fingerprint(config),
         "below_confidence_threshold": confidence < config.threshold,
         "grade": grade,
         "total_impurity": total_impurity,
         "impurity_measured": impurity_measured,
         "confidence": confidence,
+        "score_kind": "classification_probability" if config.type == "classification" else "segmentation_area",
+        "similarity_percent": None,
+        "score_semantics": "Softmax classification confidence; not visual similarity, physical composition, or validated accuracy",
+        "similarity_unavailable_reason": "Tidak tersedia referensi visual berlabel untuk seluruh kelas dan validasi skor kemiripan independen",
+        "best_candidate": {
+            "category": max(mapped_scores, key=mapped_scores.get),
+            "score_percent": confidence * 100,
+            "score_kind": "classification_probability",
+            "accepted": detected_class != UNKNOWN_GRADE,
+        },
+        "compared_classes": config.classes,
         "snapshot_path": rel_snapshot_path,
     }

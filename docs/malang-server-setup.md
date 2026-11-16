@@ -29,7 +29,7 @@ Kamera aplikasi ID **1**, station **2**: MBS 2 - PG Kebon Agung. RTSP diambil da
 
 ROI awal: x=0.58, y=0.08, width=0.39, height=0.62, label PG Kebon Agung. Template terdapat di `apps/ai-service/models/malang_roi.json`; sinkronisasi mengisi ROI kosong khusus station 2 dengan ID aktual, tanpa menimpa kalibrasi. Database AI berprioritas lebih tinggi daripada file fallback.
 
-Dua bobot Keras asli dipertahankan. Model grading menghasilkan enam kelas A/B/D/G/M/T. Model full-frame menghasilkan full_frame_sugarcane/not_full_frame. Eksekusi keduanya sudah diuji dengan frame sintetis. Tidak ada klaim akurasi lapangan dari uji tersebut.
+Dua bobot Keras dipertahankan. Model grading menggunakan 11 kelas yang tercantum dalam konfigurasi Malang aktif. Model full-frame menghasilkan full_frame_sugarcane/not_full_frame. Uji eksekusi tidak menggantikan pengujian akurasi dengan gambar lapangan berlabel.
 
 Malang memakai CPU dan dua thread Torch secara default untuk menghindari pemakaian GPU Trangkil. `.venv` lokal memakai PyTorch dasar server secara baca saja; dependensi lain berada di `.venv`. Tidak ada paket global yang di-upgrade. Versi dependency yang diperiksa dicatat pada `requirements-lock.txt`.
 

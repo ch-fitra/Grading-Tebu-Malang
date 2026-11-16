@@ -31,3 +31,5 @@ backup/malang/database-*.json
 backup/
 .deploy/
 trangkil-cicd-patch/
+storage/qc/
+models/archive/recovery-*/

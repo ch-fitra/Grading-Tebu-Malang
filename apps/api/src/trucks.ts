@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import type { HistoryQuery } from "./history-query.js";
 import { pool, transaction } from "./db.js";
+import { gradingThreshold } from "./grading-policy.js";
 
 type Input = { truckCode: string; plateNumber?: string; driverName?: string; supplier?: string; line: number; notes?: string };
 type TruckRecord = {
@@ -30,21 +31,21 @@ async function read(id?: string, db: Queryable = pool, range?: HistoryQuery): Pr
     COALESCE(AVG(i.daun_percent+i.pucuk_percent+i.sampah_percent) FILTER (WHERE i.impurity_measured),0)::float AS measured_impurity,
     BOOL_AND(i.impurity_measured IS TRUE) FILTER (WHERE i.id IS NOT NULL) AS impurity_measured,
     COALESCE(AVG(i.confidence),0)::float AS measured_confidence,
-    COALESCE(array_agg(i.grade ORDER BY i.created_at DESC, i.id DESC) FILTER (WHERE i.id IS NOT NULL), '{}') AS detected_grades
+    COALESCE(array_agg(CASE WHEN i.confidence >= $6 THEN i.grade ELSE 'Belum Dikenali' END ORDER BY i.created_at DESC, i.id DESC) FILTER (WHERE i.id IS NOT NULL), '{}') AS detected_grades
     FROM truck_inspections t
     LEFT JOIN truck_inspection_captures c ON c.inspection_id=t.id
     LEFT JOIN inference_results i ON i.id=c.inference_id
     WHERE ($1::uuid IS NULL OR t.id=$1)
       AND ($2::timestamptz IS NULL OR t.started_at >= $2)
       AND ($3::timestamptz IS NULL OR t.started_at < $3)
-    GROUP BY t.id ORDER BY t.started_at DESC, t.id DESC LIMIT $4 OFFSET $5`, [id ?? null, range?.start_at ?? null, range?.end_at ?? null, range?.limit ?? 500, range?.offset ?? 0]);
+    GROUP BY t.id ORDER BY t.started_at DESC, t.id DESC LIMIT $4 OFFSET $5`, [id ?? null, range?.start_at ?? null, range?.end_at ?? null, range?.limit ?? 500, range?.offset ?? 0, gradingThreshold()]);
   return result.rows.map(r => {
     const impurity = Number(r.measured_impurity);
     const count = Number(r.total_captures);
     const votes = new Map<string, number>();
     for (const grade of r.detected_grades as string[]) votes.set(grade, (votes.get(grade) ?? 0) + 1);
     const grade = [...votes].sort((a, b) => b[1] - a[1])[0]?.[0];
-    const decision = ["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(grade ?? "") ? "MBS" : ["Non MBS", "D", "B"].includes(grade ?? "") ? "NON_MBS" : ["G", "X"].includes(grade ?? "") ? "DITOLAK_DO" : "PENDING";
+    const decision = ["MBS", "MBS Bintang", "MBS Plus"].includes(grade ?? "") ? "MBS" : grade === "Non MBS" ? "NON_MBS" : "PENDING";
     return {
       id: String(r.id), truckCode: String(r.truck_code), plateNumber: String(r.plate_number ?? ""),
       driverName: String(r.driver_name ?? ""), supplier: String(r.supplier ?? ""), line: Number(r.line),

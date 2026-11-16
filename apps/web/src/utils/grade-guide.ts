@@ -197,6 +197,15 @@ export const KEBONAGUNG_GRADES: KebonAgungGradeItem[] = [
   }
 ];
 
+export const UNRECOGNIZED_GRADE: KebonAgungGradeItem = {
+  code: "Belum Dikenali", label: "Belum Dikenali", name: "Perlu pemeriksaan QC",
+  rafaksi: "Ditentukan QC", status: "Belum yakin", statusCls: "m", badgeCls: "badge-m",
+  img: "/grades/malang-reference.svg", color: "#64748b", grad: "#64748b",
+  kriteria: "Skor model belum memenuhi ambang penerimaan. Tidak ada kelas mutu yang dipastikan.",
+  decision: "Perlu pemeriksaan QC", tier: "manual"
+};
+export const GRADING_OUTCOMES = [...KEBONAGUNG_GRADES, UNRECOGNIZED_GRADE];
+
 export function normalizeGrade(rawGrade?: string | null): KebonAgungGradeCode {
   const value = rawGrade?.trim() ?? "";
   return (KEBONAGUNG_GRADES.find(item => item.code.toLowerCase() === value.toLowerCase())?.code ?? value) as Grade;
@@ -204,7 +213,7 @@ export function normalizeGrade(rawGrade?: string | null): KebonAgungGradeCode {
 
 export function gradeDefinition(rawGrade?: string | null): KebonAgungGradeItem {
   const code = normalizeGrade(rawGrade);
-  return KEBONAGUNG_GRADES.find(item => item.code === code) ?? {
+  return GRADING_OUTCOMES.find(item => item.code === code) ?? {
     code, label: code || "?", name: code ? "Kelas riwayat" : "Belum ada deteksi",
     rafaksi: "Ditentukan QC", status: "Referensi", statusCls: "m", badgeCls: "badge-m",
     img: "/grades/malang-reference.svg", color: "#64748b", grad: "#64748b",

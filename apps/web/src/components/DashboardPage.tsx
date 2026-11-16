@@ -60,7 +60,7 @@ function DonutGauge({ value, size = 58, strokeWidth = 6 }: { value: number; size
   );
 }
 
-import { KEBONAGUNG_GRADES, gradeDefinition, normalizeGrade } from "../utils/grade-guide";
+import { KEBONAGUNG_GRADES, GRADING_OUTCOMES, gradeDefinition, normalizeGrade } from "../utils/grade-guide";
 
 export function DashboardPage() {
   const { latest, status, refresh, history, cameras, session, truckSessions, startTruckInspection, completeTruckInspection, deleteInference, deletionRequests } = useAppStore();
@@ -611,7 +611,7 @@ export function DashboardPage() {
     const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? normalizeGrade();
 
     // Hitung distribusi kelas dari seluruh siklus
-    const gradeCounts = KEBONAGUNG_GRADES.map((tg) => {
+    const gradeCounts = GRADING_OUTCOMES.map((tg) => {
       const count = cycles.filter(c => {
         const cGrade = cycleGrade(c);
         return cGrade === tg.code;
@@ -625,7 +625,7 @@ export function DashboardPage() {
     });
 
     // Hitung persentase lolos (S, M, A) vs kena sanksi/reject (D, B, G, X)
-    const passCount = cycles.filter(c => ["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(cycleGrade(c))).length;
+    const passCount = cycles.filter(c => ["MBS", "MBS Bintang", "MBS Plus"].includes(cycleGrade(c))).length;
     const passPct = Math.round((passCount / totalCycles) * 100);
 
     // List siklus berurutan dengan info grade dan impuritas masing-masing
@@ -673,7 +673,7 @@ export function DashboardPage() {
   const confidence = effectiveInference?.confidence ?? 0;
   const grade = effectiveInference?.grade;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
-  const confidenceThreshold = status?.ai.model?.confidence_threshold;
+  const confidenceThreshold = status?.ai.model?.confidence_threshold ?? 0.5;
   const isHistoryAggregate = !activeCycle && !selectedCycle && cycleModelFrames.length > 0;
 
 
@@ -686,7 +686,7 @@ export function DashboardPage() {
   const cycleConsistency = useMemo(() => {
     if (distributionFrames.length === 0) return null;
     const total = distributionFrames.length;
-    const counts = KEBONAGUNG_GRADES.map(tg => ({
+    const counts = GRADING_OUTCOMES.map(tg => ({
       code: tg.label,
       rawCode: tg.code,
       color: tg.color,
@@ -711,7 +711,7 @@ export function DashboardPage() {
 
     cycles.forEach((c) => {
       const g = cycleGrade(c);
-      if (["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(g)) freePassCount++;
+      if (["MBS", "MBS Bintang", "MBS Plus"].includes(g)) freePassCount++;
       else if (g === "Non MBS") penaltyCount++;
       else rejectCount++;
     });
@@ -719,7 +719,7 @@ export function DashboardPage() {
     if (totalTrucks === 0 && activeLineHistory.length > 0) {
       activeLineHistory.forEach((item) => {
         const g = item.grade;
-        if (["MBS", "MBS Bintang", "MBS Plus", "S", "M", "A"].includes(g)) freePassCount++;
+        if (["MBS", "MBS Bintang", "MBS Plus"].includes(g)) freePassCount++;
         else if (g === "Non MBS") penaltyCount++;
         else rejectCount++;
       });
@@ -1152,9 +1152,8 @@ export function DashboardPage() {
             <div className={`eventFeedList${visibleEvents.length ? " hasEvents" : ""}`}>
               {visibleEvents.map((item) => {
                 const normG = normalizeGrade(item.grade);
-                const gradeColor = (normG === "S" || normG === "M" || normG === "A") ? "eventGradeBlueBright" :
-                  normG === "B" ? "eventGradeBlue" :
-                  normG === "D" ? "eventGradeSlate" : "eventGradeBlack";
+                const gradeColor = ["MBS", "MBS Bintang", "MBS Plus"].includes(normG) ? "eventGradeBlueBright" :
+                  normG === "Non MBS" ? "eventGradeSlate" : "eventGradeBlack";
                 const confPercent = Math.round((item.confidence ?? 0) * 100);
 
                 return (
@@ -1457,9 +1456,8 @@ export function DashboardPage() {
             <div className="capturePhotoGrid" ref={captureGridRef} style={{ gridTemplateColumns: `repeat(${captureColumns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${captureRows}, minmax(0, 1fr))` }}>
               {visibleCaptures.map((item) => {
                 const normG = normalizeGrade(item.grade);
-                const gradeColor = (normG === "S" || normG === "M" || normG === "A") ? "photo-grade-blue-bright" :
-                  normG === "B" ? "photo-grade-blue" :
-                  normG === "D" ? "photo-grade-slate" : "photo-grade-black";
+                const gradeColor = ["MBS", "MBS Bintang", "MBS Plus"].includes(normG) ? "photo-grade-blue-bright" :
+                  normG === "Non MBS" ? "photo-grade-slate" : "photo-grade-black";
                 return (
                   <button
                     key={item.id}
@@ -1723,7 +1721,7 @@ export function DashboardPage() {
                     </span>
                   </div>
                   <div className="cycleConsMiniBars">
-                    {(cycleConsistency?.counts || KEBONAGUNG_GRADES.map(tg => ({ code: tg.label, color: tg.color, count: 0 }))).map((c) => (
+                    {(cycleConsistency?.counts.filter(c => KEBONAGUNG_GRADES.some(tg => tg.code === c.rawCode)) || KEBONAGUNG_GRADES.map(tg => ({ code: tg.label, color: tg.color, count: 0 }))).map((c) => (
                       <div key={c.code} className="consMiniItem">
                         <span>{c.code}</span>
                         <strong style={{ color: c.color }}>{c.count}</strong>
@@ -1745,7 +1743,7 @@ export function DashboardPage() {
                   </div>
                   <div className="catKpi">
                     <span className="catKpiLabel">Rata-rata Mutu</span>
-                    <strong className={`catKpiValue ${normalizeGrade(dailyCyclesStats?.overallGrade) === "X" || normalizeGrade(dailyCyclesStats?.overallGrade) === "G" ? "danger" : normalizeGrade(dailyCyclesStats?.overallGrade) === "B" || normalizeGrade(dailyCyclesStats?.overallGrade) === "D" ? "amber" : "blue"}`}>
+                    <strong className={`catKpiValue ${gradeDefinition(dailyCyclesStats?.overallGrade).tier === "tolak" ? "danger" : gradeDefinition(dailyCyclesStats?.overallGrade).tier === "rafaksi" ? "amber" : "blue"}`}>
                       {dailyCyclesStats ? normalizeGrade(dailyCyclesStats.overallGrade) : "—"}
                     </strong>
                   </div>

@@ -4,10 +4,11 @@ import type { HistoryQuery } from "./history-query.js";
 import { randomUUID } from "node:crypto";
 import { pool, transaction } from "./db.js";
 import type { ClassPercentages, Grade } from "./rule-engine.js";
+import { acceptedGrade, gradingThreshold, UNKNOWN_GRADE } from "./grading-policy.js";
 
 export type Camera = { id: number; name: string; rtspUrl: string; location: string; status: "online" | "offline"; station: number; enabled: boolean; createdAt: string };
 export type AiModel = { id: number; name: string; version: string; path: string; active: boolean; createdAt: string };
-export type InferenceResult = { id: number; timestamp: string; cameraId: number; classes: Required<Pick<ClassPercentages, "daun" | "pucuk" | "sampah">>; impurityMeasured?: boolean; classScores?: Partial<Record<Grade, number>>; grade: Grade; confidence: number; snapshot: string | null };
+export type InferenceResult = { id: number; timestamp: string; cameraId: number; classes: Required<Pick<ClassPercentages, "daun" | "pucuk" | "sampah">>; impurityMeasured?: boolean; classScores?: Partial<Record<Grade, number>>; candidateGrade?: Grade; predictionAccepted?: boolean; confidenceThreshold?: number; grade: Grade; confidence: number; snapshot: string | null };
 export type DeletionRequest = {
   id: string;
   targetType: "inference" | "truck_inspection" | "all_inferences";
@@ -34,16 +35,25 @@ const inferenceRow = (r: Record<string, unknown>): InferenceResult => ({ id: Num
 const aiPool = process.env.AI_DATABASE_URL ? new pg.Pool({ connectionString: process.env.AI_DATABASE_URL, allowExitOnIdle: true, connectionTimeoutMillis: 5000, query_timeout: 10000 }) : null;
 aiPool?.on("error", () => console.error("Koneksi database AI terputus; riwayat tersimpan tetap tersedia"));
 async function withDetectedClasses(rows: InferenceResult[]): Promise<InferenceResult[]> {
-  if (!aiPool || !rows.length) return rows;
+  const threshold = gradingThreshold();
+  const applyPolicy = (row: InferenceResult): InferenceResult => {
+    const scoreCandidate = row.classScores
+      ? Object.entries(row.classScores).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0]?.[0] as Grade | undefined : undefined;
+    const candidateGrade = row.grade === UNKNOWN_GRADE ? scoreCandidate ?? row.grade : row.grade;
+    const grade = acceptedGrade(row.grade, row.confidence, threshold);
+    return { ...row, candidateGrade, grade, confidenceThreshold: threshold, predictionAccepted: grade !== UNKNOWN_GRADE };
+  };
+  if (!aiPool || !rows.length) return rows.map(applyPolicy);
   const paths = rows.flatMap(r => r.snapshot ? [r.snapshot.replace(/^\/+/, "")] : []);
   const result = await aiPool.query("SELECT DISTINCT ON (snapshot_path) snapshot_path, detected_class, classes_score FROM ai_inference_results WHERE snapshot_path = ANY($1::text[]) ORDER BY snapshot_path, id DESC", [paths]).catch(() => null);
-  if (!result) return rows;
+  if (!result) return rows.map(applyPolicy);
   const byPath = new Map(result.rows.map(r => [r.snapshot_path, r]));
   return rows.map(row => {
     const detection = byPath.get(row.snapshot?.replace(/^\/+/, ""));
-    return detection && ["ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar", "S", "M", "A", "D", "B", "T", "G", "X"].includes(detection.detected_class)
+    // Historical model labels must survive class additions/removals in today's model.
+    return applyPolicy(detection && typeof detection.detected_class === "string" && detection.detected_class.trim()
       ? { ...row, grade: detection.detected_class as Grade, classScores: Object.keys(detection.classes_score ?? {}).some(code => ["daun", "pucuk", "sampah"].includes(code)) ? undefined : detection.classes_score }
-      : row;
+      : row);
   });
 }
 

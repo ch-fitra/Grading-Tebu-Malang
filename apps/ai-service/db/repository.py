@@ -7,6 +7,7 @@ from contextlib import closing
 from typing import Dict, Any, Optional, List
 from db.connection import get_ai_db_connection, get_auth_db_connection
 from psycopg2.extras import RealDictCursor
+from grading_policy import UNKNOWN_GRADE, grading_threshold, apply_history_policy
 
 logger = logging.getLogger("ai_repository")
 
@@ -137,11 +138,12 @@ class AIRepository:
                     detections = {row["snapshot_path"]: row for row in cursor.fetchall()}
             for item in items:
                 detection = detections.get((item["snapshot"] or "").lstrip("/"))
-                if detection and detection["detected_class"] in ("ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar", "S", "M", "A", "D", "B", "T", "G", "X"):
+                if detection and isinstance(detection["detected_class"], str) and detection["detected_class"].strip():
                     item["grade"] = detection["detected_class"]
                     if not any(key in (detection["classes_score"] or {}) for key in ("daun", "pucuk", "sampah")):
                         item["classScores"] = detection["classes_score"]
-        return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
+        threshold = grading_threshold()
+        return {"items": [apply_history_policy(item, threshold) for item in items], "total": total, "page": page, "page_size": page_size, "pages": pages}
 
     @staticmethod
     def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
@@ -253,8 +255,7 @@ class AIRepository:
     @staticmethod
     def complete_auto_inspection(cycle_code: str, summary: Dict[str, Any]):
         grade = summary.get("majority_class")
-        decision = ("MBS" if grade in ("MBS", "MBS Bintang", "MBS Plus", "S", "M", "A") else "NON_MBS" if grade in ("Non MBS", "D", "B")
-                    else "DITOLAK_DO" if grade in ("G", "X") else "PENDING")
+        decision = ("MBS" if grade in ("MBS", "MBS Bintang", "MBS Plus") else "NON_MBS" if grade == "Non MBS" else "PENDING")
         with closing(get_auth_db_connection()) as conn, conn:
             with conn.cursor() as cursor:
                 cursor.execute("""
@@ -320,12 +321,12 @@ class AIRepository:
                             COUNT(*) as total_frames,
                             AVG(total_impurity) as avg_impurity,
                             AVG(confidence) as avg_confidence,
-                            MODE() WITHIN GROUP (ORDER BY detected_class) as majority_class,
+                            MODE() WITHIN GROUP (ORDER BY CASE WHEN confidence >= %s THEN detected_class ELSE %s END) as majority_class,
                             (SELECT snapshot_path FROM ai_inference_results WHERE cycle_code = %s ORDER BY confidence DESC LIMIT 1) as best_snapshot,
                             (SELECT json_agg(snapshot_path) FROM ai_inference_results WHERE cycle_code = %s AND snapshot_path IS NOT NULL) as all_snapshots
                         FROM ai_inference_results
                         WHERE cycle_code = %s;
-                    """, (cycle_code, cycle_code, cycle_code))
+                    """, (grading_threshold(), UNKNOWN_GRADE, cycle_code, cycle_code, cycle_code))
                     agg = cursor.fetchone()
 
                     if not agg or agg["total_frames"] == 0:

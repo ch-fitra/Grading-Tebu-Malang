@@ -109,7 +109,7 @@ def run_ai_migrations():
                     classes_score JSONB,
                     total_impurity NUMERIC(10,2),
                     detected_class VARCHAR(10),
-                    confidence NUMERIC(10,4),
+                    confidence DOUBLE PRECISION,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
@@ -117,7 +117,7 @@ def run_ai_migrations():
             cursor.execute("""
                 ALTER TABLE ai_inference_results
                 ALTER COLUMN total_impurity TYPE NUMERIC(10,2),
-                ALTER COLUMN confidence TYPE NUMERIC(10,4);
+                ALTER COLUMN confidence TYPE DOUBLE PRECISION;
             """)
 
             # Add cycle_id & cycle_code to ai_inference_results if table already existed

@@ -16,7 +16,6 @@ import { config } from "./config.js";
 import { store } from "./store.js";
 import { auth, PERMISSIONS, type Permission, type User } from "./auth.js";
 import { trucks } from "./trucks.js";
-import { calculateGrade } from "./rule-engine.js";
 import { pool } from "./db.js";
 
 const app = Fastify({ logger: { redact: { paths: ["req.url"], censor: "[redacted]" } } });
@@ -678,8 +677,10 @@ app.post("/api/cameras/:id/capture", async (request, reply) => {
       sampah: z.number().finite().min(0).max(100),
     }).safeParse(classes);
     if (!validatedClasses.success) return reply.code(502).send({ message: "Format keluaran kelas AI tidak valid" });
-    const gradeResult = z.enum(["ATPSD", "Akar Tanah", "Daduk", "Kocok Air", "MBS", "MBS Bintang", "MBS Plus", "Non MBS", "Sogolan Pucuk", "Tebu Muda", "Terbakar"]).safeParse(
-      data.detected_class ?? data.grade ?? (data.impurity_measured ? calculateGrade(validatedClasses.data) : undefined)
+    const { activeGradingClasses, UNKNOWN_GRADE } = await import("./grading-policy.js");
+    const permittedGrades = activeGradingClasses();
+    const gradeResult = z.string().refine(value => value === UNKNOWN_GRADE || permittedGrades.includes(value)).safeParse(
+      data.detected_class ?? data.grade
     );
     if (!gradeResult.success) return reply.code(502).send({ message: "Kelas mutu keluaran AI tidak valid" });
     const grade = gradeResult.data;

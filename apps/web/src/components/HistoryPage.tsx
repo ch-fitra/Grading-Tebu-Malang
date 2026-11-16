@@ -872,7 +872,7 @@ export function HistoryPage() {
                             </span>
                           </td>
                           <td>
-                            {<span className={`decision-badge ${["G", "X"].includes(gradeCode) ? "reject" : ["D", "B"].includes(gradeCode) ? "non-mbs" : gradeCode === "T" ? "pending" : "mbs"}`}>{KEBONAGUNG_GRADES.find(g => g.code === gradeCode)?.decision ?? "Belum ditetapkan"}</span>}
+                            {<span className={`decision-badge ${gradeDefinition(gradeCode).tier === "tolak" ? "reject" : gradeDefinition(gradeCode).tier === "rafaksi" ? "non-mbs" : gradeDefinition(gradeCode).tier === "manual" ? "pending" : "mbs"}`}>{KEBONAGUNG_GRADES.find(g => g.code === gradeCode)?.decision ?? "Belum ditetapkan"}</span>}
                           </td>
                           <td>
                             <span className={`sessionStatusPill ${row.status}`}>

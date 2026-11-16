@@ -1,5 +1,5 @@
-// Legacy codes remain readable in saved history. New detections use the Malang labels.
-export type Grade = "ATPSD" | "Akar Tanah" | "Daduk" | "Kocok Air" | "MBS" | "MBS Bintang" | "MBS Plus" | "Non MBS" | "Sogolan Pucuk" | "Tebu Muda" | "Terbakar" | "S" | "M" | "A" | "D" | "B" | "T" | "G" | "X";
+// Grading classes are validated against the active Malang model configuration.
+export type Grade = string;
 
 export type ClassPercentages = {
   daun?: number;
@@ -7,25 +7,3 @@ export type ClassPercentages = {
   sampah?: number;
   [key: string]: number | undefined;
 };
-
-export function calculateGrade(classes: ClassPercentages): Grade {
-  const daun = classes.daun ?? 0;
-  const pucuk = classes.pucuk ?? 0;
-  const sampah = classes.sampah ?? 0;
-  const totalKotoran = daun + pucuk + sampah;
-
-  // Afkir / Bahaya ekstrim (sampah asing tinggi atau kotoran masif)
-  if (sampah > 15 || totalKotoran > 35) return "X";
-  // Ditolak Giling (Reject meja tebu)
-  if (totalKotoran > 20) return "G";
-  // Potongan Bobot 2,5% (Sortir meja)
-  if (totalKotoran > 15) return "B";
-  // Potongan Bobot 1% (Pengawasan)
-  if (totalKotoran > 10) return "D";
-  // Toleransi Giling (Simbol A)
-  if (totalKotoran > 5) return "A";
-  // Standar Ideal (Simbol M)
-  if (totalKotoran > 2) return "M";
-  // Super (Non-Kotor)
-  return "S";
-}

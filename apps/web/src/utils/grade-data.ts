@@ -1,6 +1,14 @@
 import type { Grade, InferenceResult, TruckInspectionSession } from "../types";
 import { normalizeGrade } from "./grade-guide";
 
+// The main result belongs to one image, never to a frequency or cycle average.
+export function newestFrame<T extends Pick<InferenceResult, "timestamp" | "id">>(frames: T[]): T | null {
+  return frames.reduce<T | null>((latest, frame) => !latest ||
+    Date.parse(frame.timestamp) > Date.parse(latest.timestamp) ||
+    (Date.parse(frame.timestamp) === Date.parse(latest.timestamp) && frame.id > latest.id)
+    ? frame : latest, null);
+}
+
 // Count selected labels, independently of the model's probability vector.
 export function frameGradeDistribution(frames: Pick<InferenceResult, "grade">[], grades: Grade[]) {
   const counts = new Map<Grade, number>();
@@ -24,6 +32,12 @@ export function dominantGrade(frames: Pick<InferenceResult, "grade">[]): Grade |
   const counts = new Map<Grade, number>();
   for (const frame of frames) counts.set(frame.grade, (counts.get(frame.grade) ?? 0) + 1);
   return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+// Confidence belongs to the selected outcome, not to other frames' winning classes.
+export function outcomeConfidence(frames: Pick<InferenceResult, "grade" | "confidence">[], grade: Grade | undefined): number {
+  const matching = frames.filter(frame => frame.grade === grade);
+  return matching.length ? matching.reduce((sum, frame) => sum + frame.confidence, 0) / matching.length : 0;
 }
 export function meanClassScores(frames: Pick<InferenceResult, "classScores">[]): Partial<Record<Grade, number>> | undefined {
   const scored = frames.filter(frame => frame.classScores);

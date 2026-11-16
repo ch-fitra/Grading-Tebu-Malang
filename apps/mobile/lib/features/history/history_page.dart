@@ -36,7 +36,7 @@ class _HistoryViewState extends State<HistoryView> {
       Wrap(
         spacing: 7,
         children: [
-          for (final value in ['Semua', 'M', 'A/M', 'A', 'D', 'B', 'Reject'])
+          for (final value in <String>{'Semua', ...widget.state.history.map((r) => '${r['grade'] ?? ''}').where((value) => value.isNotEmpty)})
             ChoiceChip(
               label: Text(value),
               selected: grade == value,
