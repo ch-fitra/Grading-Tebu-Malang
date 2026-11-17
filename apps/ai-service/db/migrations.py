@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import logging
 import os
 import psycopg2
@@ -10,6 +8,33 @@ from psycopg2.extensions import parse_dsn
 from db.connection import AI_DB_URL, get_ai_db_connection
 
 logger = logging.getLogger("ai_migrations")
+
+
+def _ensure_column_types(cursor, table, expected_types):
+    """Skip type DDL when the existing type and typmod already match.
+
+    Repeating ALTER TYPE can lock/rewrite a large snapshot table even though
+    the application schema is already current. Keep necessary changes in one
+    ALTER statement so a real upgrade does not rewrite once per column.
+    """
+    allowed_types = {"numeric(10,2)", "numeric(10,4)", "double precision", "character varying(50)"}
+    if not expected_types or any(value not in allowed_types for value in expected_types.values()):
+        raise ValueError("Target tipe migrasi tidak valid")
+    cursor.execute("""
+        SELECT attname, format_type(atttypid, atttypmod)
+        FROM pg_attribute
+        WHERE attrelid = to_regclass(%s) AND attname = ANY(%s)
+          AND attnum > 0 AND NOT attisdropped
+    """, (table, list(expected_types)))
+    current_types = dict(cursor.fetchall())
+    missing = set(expected_types) - current_types.keys()
+    if missing:
+        raise ValueError(f"Kolom migrasi tidak ditemukan pada {table}: {sorted(missing)}")
+    changes = [sql.SQL("ALTER COLUMN {} TYPE {}").format(sql.Identifier(column), sql.SQL(target))
+               for column, target in expected_types.items() if current_types[column] != target]
+    if changes:
+        cursor.execute(sql.SQL("ALTER TABLE {} {}").format(
+            sql.Identifier(table), sql.SQL(", ").join(changes)))
 
 
 def ensure_ai_database_exists():
@@ -91,10 +116,13 @@ def run_ai_migrations():
 
             cursor.execute("""
                 ALTER TABLE ai_results
-                ADD COLUMN IF NOT EXISTS snapshot_paths JSONB,
-                ALTER COLUMN avg_total_impurity TYPE NUMERIC(10,2),
-                ALTER COLUMN confidence_avg TYPE NUMERIC(10,4);
+                ADD COLUMN IF NOT EXISTS snapshot_paths JSONB;
             """)
+            _ensure_column_types(cursor, "ai_results", {
+                "avg_total_impurity": "numeric(10,2)",
+                "confidence_avg": "numeric(10,4)",
+                "majority_class": "character varying(50)",
+            })
 
             # 4. Table: ai_inference_results (Raw Frames tied to Cycle)
             cursor.execute("""
@@ -114,11 +142,11 @@ def run_ai_migrations():
                 );
             """)
 
-            cursor.execute("""
-                ALTER TABLE ai_inference_results
-                ALTER COLUMN total_impurity TYPE NUMERIC(10,2),
-                ALTER COLUMN confidence TYPE DOUBLE PRECISION;
-            """)
+            _ensure_column_types(cursor, "ai_inference_results", {
+                "total_impurity": "numeric(10,2)",
+                "confidence": "double precision",
+                "detected_class": "character varying(50)",
+            })
 
             # Add cycle_id & cycle_code to ai_inference_results if table already existed
             cursor.execute("""
@@ -127,15 +155,7 @@ def run_ai_migrations():
                 ADD COLUMN IF NOT EXISTS cycle_code VARCHAR(50);
             """)
 
-            cursor.execute("ALTER TABLE ai_results ALTER COLUMN majority_class TYPE VARCHAR(50)")
-            cursor.execute("ALTER TABLE ai_inference_results ALTER COLUMN detected_class TYPE VARCHAR(50)")
-            config = json.loads((Path(__file__).resolve().parents[1] / "models/active/config.json").read_text())
-            cursor.execute("UPDATE ai_models SET is_active=false WHERE is_active=true AND model_code <> 'MDL_MALANG_11'")
-            cursor.execute("""INSERT INTO ai_models(model_code,model_name,version,model_path,is_active,config_json)
-                VALUES('MDL_MALANG_11',%s,%s,%s,true,%s)
-                ON CONFLICT(model_code) DO UPDATE SET model_name=EXCLUDED.model_name,
-                version=EXCLUDED.version,model_path=EXCLUDED.model_path,is_active=true,config_json=EXCLUDED.config_json""",
-                (config['name'],config['version'],config['model_path'],json.dumps(config)))
+            cursor.execute("UPDATE ai_models SET is_active=false WHERE is_active=true")
 
         conn.commit()
         logger.info("Migrasi skema database 'sugarcane_ai' berhasil dijalankan.")

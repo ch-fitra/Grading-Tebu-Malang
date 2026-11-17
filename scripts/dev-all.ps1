@@ -26,7 +26,6 @@ try {
     if ($env:INSTALLATION_ID -ne 'malang') { throw 'Instalasi ini bukan Malang.' }
     if ($env:API_PORT -ne '4111' -or $env:AI_SERVICE_URL -ne 'http://127.0.0.1:8011') { throw 'Launcher demo Malang memakai API 4111 dan AI 8011. Periksa .env.' }
     Set-ChildEnv 'NODE_ENV' 'development'
-    Set-ChildEnv 'KERAS_BACKEND' 'torch'
     Set-ChildEnv 'API_HOST' $(if ($IncludeMobile) { '0.0.0.0' } else { '127.0.0.1' })
     Set-ChildEnv 'VITE_API_URL' 'same-origin'
     Set-ChildEnv 'VITE_BACKEND_URL' 'http://127.0.0.1:4111'
@@ -87,7 +86,7 @@ try {
     if ($CheckOnly) {
         Write-Host "Pemeriksaan selesai. Rencana: $names. Mobile siap: $mobileReady. Tidak ada layanan atau aplikasi klien yang dijalankan."
     } else {
-        & $python -c 'import uvicorn, cv2, psycopg2, fastapi, keras, torch'
+        & $python -c 'import uvicorn, cv2, psycopg2, fastapi'
         Require-Success 'Dependensi AI Malang'
         & node (Join-Path $projectRoot 'apps/desktop/scripts/ensure-electron.cjs')
         Require-Success 'Runtime desktop Electron'

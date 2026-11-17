@@ -3,14 +3,12 @@ import { parseHistoryQuery } from "./history-query.js";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
-import Fastify, { type FastifyReply } from "fastify";
-import { createHmac, randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { mkdir, readFile, unlink, stat } from "node:fs/promises";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { createHmac } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { pipeline } from "node:stream/promises";
 import { z } from "zod";
 import { config } from "./config.js";
 import { store } from "./store.js";
@@ -632,130 +630,32 @@ app.post("/api/cameras/:id/roi", async (request, reply) => {
   }
 });
 
-// Trigger Live Capture & AI Inference on Camera
-app.post("/api/cameras/:id/capture", async (request, reply) => {
+const aiNotConfigured = (_request: unknown, reply: FastifyReply) =>
+  reply.code(503).send({ status: "not_configured", message: "AI belum dikonfigurasi" });
+
+async function gradingRequest(request: FastifyRequest, reply: FastifyReply, path: string, payload: unknown) {
   const actor = (await currentUser(request.headers.authorization))!;
-  if (actor.role === "admin") {
-    return reply.code(403).send({ message: "Akun Admin (Direksi) dibatasi dari pemicuan pemindaian manual. Pemicuan pemindaian hanya dilakukan oleh Akun Operator lapangan." });
-  }
-  const id = Number((request.params as { id: string }).id);
-  const camera = (await store.listCameras()).find(c => c.id === id);
-  if (!camera) return reply.code(404).send({ message: "Kamera tidak ditemukan" });
-  if (!camera.enabled) return reply.code(409).send({ message: "Kamera dinonaktifkan" });
-
-  if ((await trucks.list()).some(cycle => cycle.line === id && cycle.status === "active")) return reply.code(409).send({ message: "Capture otomatis satu detik sedang berjalan; tidak perlu capture manual tambahan" });
+  if (actor.role === "admin") return reply.code(403).send({ message: "Kontrol grading hanya untuk operator lapangan" });
   try {
-    const aiRes = await fetch(`${config.aiServiceUrl}/infer`, {
-      method: "POST",
-      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(30000),
-      body: JSON.stringify({ camera_id: id, crop_roi: true })
+    const response = await fetch(`${config.aiServiceUrl}${path}`, {
+      method: "POST", headers: { ...aiServiceHeaders, Authorization: request.headers.authorization ?? "", "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(60000)
     });
-
-    if (!aiRes.ok) return reply.code(502).send({ message: "Gagal memproses inferensi AI" });
-    const output = z.object({
-      impurity_measured: z.boolean().optional(),
-      classes: z.record(z.number().finite().min(0).max(100)),
-      grade: z.string().optional(),
-      detected_class: z.string().optional(),
-      confidence: z.number().finite().min(0).max(1),
-      snapshot_path: z.string().regex(/^storage\/snapshots\/[a-zA-Z0-9_/-]+\.jpg$/).refine(value => !value.includes("..")),
-      timestamp: z.string().datetime({ offset: true }),
-    }).safeParse(await aiRes.json());
-    if (!output.success) return reply.code(502).send({ message: "Format keluaran AI tidak valid" });
-    const data = output.data;
-
-    // Grade probabilities do not measure physical impurity.
-    const classes = {
-      daun: data.impurity_measured === true ? data.classes.daun : 0,
-      pucuk: data.impurity_measured === true ? data.classes.pucuk : 0,
-      sampah: data.impurity_measured === true ? data.classes.sampah : 0,
-    };
-    const validatedClasses = z.object({
-      daun: z.number().finite().min(0).max(100),
-      pucuk: z.number().finite().min(0).max(100),
-      sampah: z.number().finite().min(0).max(100),
-    }).safeParse(classes);
-    if (!validatedClasses.success) return reply.code(502).send({ message: "Format keluaran kelas AI tidak valid" });
-    const { activeGradingClasses, UNKNOWN_GRADE } = await import("./grading-policy.js");
-    const permittedGrades = activeGradingClasses();
-    const gradeResult = z.string().refine(value => value === UNKNOWN_GRADE || permittedGrades.includes(value)).safeParse(
-      data.detected_class ?? data.grade
-    );
-    if (!gradeResult.success) return reply.code(502).send({ message: "Kelas mutu keluaran AI tidak valid" });
-    const grade = gradeResult.data;
-
-    const added = await store.addInference({
-      cameraId: id,
-      impurityMeasured: data.impurity_measured === true,
-      grade,
-      classes: validatedClasses.data,
-      confidence: data.confidence,
-      snapshot: `/${data.snapshot_path}`,
-      timestamp: data.timestamp
-    });
-
-    broadcast("inference.created", added);
-    return reply.send(added);
-  } catch (err) {
-    return reply.code(500).send({ message: "Gagal menjalankan capture", detail: String(err) });
-  }
+    const result = await response.json();
+    if (!response.ok) return reply.code(response.status).send(result);
+    return result;
+  } catch { return reply.code(502).send({ message: "Layanan grading tidak dapat dihubungi" }); }
+}
+app.post("/api/cameras/:id/capture", async (request, reply) => {
+  const cameraId = Number((request.params as { id: string }).id);
+  const result = await gradingRequest(request, reply, "/infer", { camera_id: cameraId });
+  if (reply.sent) return;
+  broadcast("inference.created", result);
+  return result;
 });
-
-app.get("/api/models", async () => await store.listModels());
-
-app.post("/api/models/upload", async (request, reply) => {
-  const parts = request.parts();
-  let name = "", version = "", path = "";
-  const archive = new URL("../../../models/archive/", import.meta.url);
-  await mkdir(archive, { recursive: true });
-  try {
-    for await (const part of parts) {
-      if (part.type === "field" && part.fieldname === "name") name = String(part.value).trim();
-      if (part.type === "field" && part.fieldname === "version") version = String(part.value).trim();
-      if (part.type === "file") {
-        if (!part.filename.toLowerCase().endsWith(".onnx")) {
-          part.file.resume();
-          return reply.code(400).send({ message: "File model harus berformat .onnx" });
-        }
-        const filename = `${randomUUID()}.onnx`;
-        path = `models/archive/${filename}`;
-        await pipeline(part.file, createWriteStream(new URL(filename, archive), { flags: "wx" }));
-        if (part.file.truncated) throw new Error("File model melebihi 200 MB");
-      }
-    }
-    if (!z.string().min(1).max(100).safeParse(name).success || !z.string().min(1).max(50).safeParse(version).success || !path) {
-      if (path) await unlink(new URL(path.split("/").at(-1)!, archive)).catch(() => {});
-      return reply.code(400).send({ message: "Nama, versi, dan file model wajib diisi" });
-    }
-    if ((await stat(new URL(path.split("/").at(-1)!, archive))).size === 0) {
-      await unlink(new URL(path.split("/").at(-1)!, archive));
-      return reply.code(400).send({ message: "File model tidak boleh kosong" });
-    }
-    const model = await store.addModel({ name, version, path });
-    broadcast("model.created", model);
-    return model;
-  } catch (error) {
-    if (path) await unlink(new URL(path.split("/").at(-1)!, archive)).catch(() => {});
-    throw error;
-  }
-});
-
-app.post("/api/models/activate", async (request, reply) => {
-  const parsed = z.object({ id: z.number().int().positive() }).safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-  const model = await store.activateModel(parsed.data.id, async selected => {
-    const response = await fetch(`${config.aiServiceUrl}/models/activate`, {
-      method: "POST", headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: selected.name, version: selected.version, model_path: selected.path }),
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!response.ok) throw Object.assign(new Error("Model tidak dapat diaktifkan oleh AI service"), { statusCode: 502 });
-  });
-  if (!model) return reply.code(404).send({ message: "Model not found" });
-  broadcast("model.activated", model);
-  return model;
-});
+app.get("/api/models", async () => (await store.listModels()).map(model => ({ ...model, active: false })));
+app.post("/api/models/upload", aiNotConfigured);
+app.post("/api/models/activate", aiNotConfigured);
 
 app.get("/api/inference/latest", async () => {
   return store.latestInference();
@@ -763,7 +663,6 @@ app.get("/api/inference/latest", async () => {
 
 app.get("/api/inference/history", async (request) => {
   const range = parseHistoryQuery(request.query);
-  if (!range.offset) await store.syncModelCaptures().catch(() => {});
   return store.listInference(range);
 });
 
@@ -788,73 +687,26 @@ app.delete("/api/inference", async (request, reply) => {
   return { ok: true };
 });
 
-const truckInput = z.object({ truckCode: z.string().trim().min(1).max(100), plateNumber: z.string().max(30).optional(), driverName: z.string().max(100).optional(), supplier: z.string().max(150).optional(), line: z.number().int().positive(), notes: z.string().max(2000).optional() });
 app.get("/api/truck-inspections", async (request) => {
   return trucks.list(parseHistoryQuery(request.query));
 });
 app.post("/api/truck-inspections", async (request, reply) => {
-  const actor = (await currentUser(request.headers.authorization))!;
-  if (actor.role === "admin") {
-    return reply.code(403).send({ message: "Akun Admin (Direksi) dibatasi dari kontrol fisik conveyor. Hanya Akun Operator lapangan yang dapat memulai siklus pemindaian." });
-  }
-  const parsed = truckInput.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-  const allCams = await store.listCameras();
-  const camera = allCams.find(item => item.id === parsed.data.line);
-  if (!camera) return reply.code(400).send({ message: "Kamera/jalur tidak ditemukan" });
-  if (!camera.enabled || !camera.rtspUrl) return reply.code(409).send({ message: "Kamera dinonaktifkan atau endpoint belum diisi" });
-  let created;
-  try { created = await trucks.create({ ...parsed.data, line: camera.id }); }
-  catch (error) {
-    if ((error as { code?: string }).code === "23505") return reply.code(409).send({ message: "Masih ada inspeksi aktif pada jalur ini" });
-    throw error;
-  }
-
-  // Notify AI Engine in database sugarcane_ai to start cycle scanning
-  try {
-    const started = await fetch(`${config.aiServiceUrl}/cycle/start`, {
-      method: "POST",
-      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ camera_id: camera.id, cycle_code: created.id }),
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!started.ok) throw new Error(`AI start failed: ${started.status}`);
-  } catch (err) {
-    await trucks.delete(created.id, true);
-    return reply.code(502).send({ message: "AI service gagal memulai siklus", detail: String(err) });
-  }
-
-  broadcast("truck.created", created);
-  return created;
+  const parsed = z.object({ line: z.number().int().positive(), truckCode: z.string().max(100), notes: z.string().max(5000).optional() }).safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ message: "Data siklus tidak valid" });
+  const result = await gradingRequest(request, reply, "/cycle/start", { camera_id: parsed.data.line, truck_code: parsed.data.truckCode, notes: parsed.data.notes ?? "" }) as { cycle_code?: string };
+  if (reply.sent || !result?.cycle_code) return;
+  const cycle = await trucks.get(result.cycle_code);
+  broadcast("truck.updated", cycle);
+  return cycle;
 });
 app.patch("/api/truck-inspections/:id/complete", async (request, reply) => {
-  const actor = (await currentUser(request.headers.authorization))!;
-  if (actor.role === "admin") {
-    return reply.code(403).send({ message: "Akun Admin (Direksi) dibatasi dari kontrol fisik conveyor. Penghentian siklus dilakukan oleh Akun Operator lapangan." });
-  }
   const id = (request.params as { id: string }).id;
-  if (!z.string().uuid().safeParse(id).success) return reply.code(400).send({ message: "ID inspeksi tidak valid" });
-  const parsed = z.object({ notes: z.string().max(2000).optional() }).safeParse(request.body ?? {});
-  if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-  const active = await trucks.get(id);
-  if (!active || active.status !== "active") return reply.code(404).send({ message: "Inspeksi aktif tidak ditemukan" });
-
-  // Notify AI Engine in database sugarcane_ai to stop cycle scanning & aggregate ai_results
-  try {
-    const stopped = await fetch(`${config.aiServiceUrl}/cycle/stop`, {
-      method: "POST",
-      headers: { ...aiServiceHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ cycle_code: id }),
-      signal: AbortSignal.timeout(35000)
-    });
-    if (!stopped.ok) throw new Error(`AI stop failed: ${stopped.status}`);
-  } catch (err) {
-    return reply.code(502).send({ message: "AI service belum berhasil menghentikan siklus; ulangi Stop", detail: String(err) });
-  }
-
-  await store.syncModelCaptures();
-  const completed = await trucks.complete(id, parsed.data.notes);
-  broadcast("truck.completed", completed);
+  const cycle = await trucks.get(id);
+  if (!cycle) return reply.code(404).send({ message: "Siklus tidak ditemukan" });
+  const result = await gradingRequest(request, reply, "/cycle/stop", { camera_id: cycle.line, cycle_code: id });
+  if (reply.sent || !result) return;
+  const completed = await trucks.get(id);
+  broadcast("truck.updated", completed);
   return completed;
 });
 app.post("/api/truck-inspections/sync-tapping", async (request, reply) => {
@@ -907,18 +759,5 @@ app.delete("/api/truck-inspections/:id", async (request, reply) => {
   return { ok: true };
 });
 
-{
-  await store.syncModelCaptures().catch(error => app.log.warn(error, "AI capture sync is not ready; retrying in background"));
-  let syncRunning = false;
-  const syncTimer = setInterval(async () => {
-    if (syncRunning) return;
-    syncRunning = true;
-    try { if (await store.syncModelCaptures()) broadcast("inference.synced", {}); }
-    catch (error) { app.log.error(error, "AI capture synchronization failed"); }
-    finally { syncRunning = false; }
-  }, 1000);
-  syncTimer.unref();
-  app.addHook("onClose", async () => clearInterval(syncTimer));
-}
 export { app };
 await app.listen({ host: config.host, port: config.port });

@@ -33,3 +33,5 @@ backup/
 trangkil-cicd-patch/
 storage/qc/
 models/archive/recovery-*/
+
+/apps/ai-service.zip

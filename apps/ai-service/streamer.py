@@ -19,17 +19,13 @@ logging.basicConfig(level=logging.INFO)
 ROOT = Path(__file__).resolve().parents[2]
 ROI_CONFIG_FILE = ROOT / "storage" / "roi_config.json"
 
-# Global OpenCV FFmpeg low-latency flags
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;tcp|"
-    "fflags;nobuffer|"
-    "flags;low_delay|"
-    "framedrop;1|"
-    "strict;experimental|"
-    "stimeout;5000000|"
-    "max_delay;500000|"
-    "reorder_queue_size;0|"
-    "buffer_size;1048576"
+# Local UDP tests lost RTP packets and produced corrupt HEVC frames before JPEG
+# encoding. TCP decoded intact main-stream frames. Bound stream probing so it
+# finishes within the existing five-second open timeout; keep decoder buffering
+# defaults and allow an explicit deployment override.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|analyzeduration;1000000|probesize;32768",
 )
 
 
@@ -162,6 +158,7 @@ class CameraStream:
         self.latest_overlay_jpeg: Optional[bytes] = None
         self.latest_raw_jpeg: Optional[bytes] = None
         self.encoded_frame_id: int = 0
+        self.encoded_source_time: float = 0.0
 
         # Status & Telemetry
         self.last_frame_time: float = 0.0
@@ -219,7 +216,11 @@ class CameraStream:
         with self.encoded_cond:
             self.encoded_cond.notify_all()
         if self.capture_thread and self.capture_thread.is_alive():
-            self.capture_thread.join(timeout=1.0)
+            # Open/read can block for five seconds. Do not overlap a replacement
+            # VideoCapture with a worker still finishing its previous read.
+            self.capture_thread.join(timeout=6.0)
+            if self.capture_thread.is_alive():
+                raise RuntimeError(f"Camera #{self.camera_id} capture worker has not stopped")
         if self.encode_thread and self.encode_thread.is_alive():
             self.encode_thread.join(timeout=1.0)
         self.is_connected = False
@@ -441,9 +442,10 @@ class CameraStream:
                     stop_event.wait(2.5)
                     continue
 
-                self.is_connected = True
-                self.last_error = None
-                logger.info(f"Camera #{self.camera_id} connected successfully.")
+                # An RTSP session is not evidence of decoded video.
+                self.is_connected = False
+                first_frame = True
+                logger.info(f"Camera #{self.camera_id} RTSP session opened; waiting for decoded video.")
 
                 while not stop_event.is_set():
                     ret, frame = cap.read()
@@ -452,6 +454,7 @@ class CameraStream:
                     if not ret or frame is None:
                         logger.warning(f"Camera #{self.camera_id} read returned empty frame. Reconnecting...")
                         self.is_connected = False
+                        self.last_error = "RTSP read did not return a decoded frame"
                         break
 
                     now = time.time()
@@ -460,7 +463,11 @@ class CameraStream:
                         self.raw_frame_id += 1
                         self.last_frame_time = now
                         self.is_connected = True
+                        self.last_error = None
                         self.res_h, self.res_w = frame.shape[:2]
+                        if first_frame:
+                            logger.info(f"Camera #{self.camera_id} receiving decoded video: {self.res_w}x{self.res_h}")
+                            first_frame = False
 
                         # Calculate true hardware capture FPS
                         self.frame_count += 1
@@ -503,6 +510,7 @@ class CameraStream:
                 if stop_event.is_set():
                     break
                 raw = self.latest_raw_frame
+                source_time = self.last_frame_time
                 last_processed_raw_id = self.raw_frame_id
 
             if raw is None:
@@ -526,6 +534,7 @@ class CameraStream:
                 with self.encoded_cond:
                     self.latest_overlay_jpeg = overlay_bytes
                     self.latest_raw_jpeg = raw_bytes
+                    self.encoded_source_time = source_time
                     self.encoded_frame_id += 1
                     # Wake up all waiting FastAPI StreamingResponse generators
                     self.encoded_cond.notify_all()
@@ -537,24 +546,28 @@ class CameraStream:
         overlay: bool = True,
         last_fid: int = -1,
         timeout: float = 0.08,
-    ) -> Tuple[bytes, int]:
+    ) -> Tuple[Optional[bytes], int]:
         """Asynchronously waits for the next ready JPEG from the background encoder.
         Returns instantly with 0 GIL blocking and 0 event loop starvation.
         """
         def _wait():
             with self.encoded_cond:
                 # If camera is connected and a newer frame is already ready
-                if self.is_connected and time.time() - self.last_frame_time < 4.0 and self.encoded_frame_id != last_fid and self.latest_overlay_jpeg is not None:
+                if self.is_connected and time.time() - self.encoded_source_time < 4.0 and self.encoded_frame_id != last_fid and self.latest_overlay_jpeg is not None:
                     jpeg = self.latest_overlay_jpeg if overlay else self.latest_raw_jpeg
                     return jpeg, self.encoded_frame_id
 
                 # Wait for next frame signal from encoder thread
                 self.encoded_cond.wait(timeout=timeout)
-                if self.is_connected and time.time() - self.last_frame_time < 4.0 and self.latest_overlay_jpeg is not None:
+                if self.is_connected and time.time() - self.encoded_source_time < 4.0 and self.encoded_frame_id != last_fid and self.latest_overlay_jpeg is not None:
                     jpeg = self.latest_overlay_jpeg if overlay else self.latest_raw_jpeg
                     return jpeg, self.encoded_frame_id
 
-                # Standby fallback if disconnected / waiting
+                if self.is_connected and time.time() - self.last_frame_time < 4.0:
+                    # A live camera with no new encoded frame is not a new frame.
+                    return None, last_fid
+                # Standby fallback if disconnected / waiting. Explicitly tagged
+                # in multipart headers; never report it as decoded live video.
                 return self._standby_jpeg, -1
 
         return await asyncio.to_thread(_wait)
@@ -568,12 +581,16 @@ class CameraStream:
                 jpeg, fid = await self.get_next_jpeg_async(overlay=overlay, last_fid=last_fid)
                 if jpeg is not None:
                     if target_width != 1280 or quality != 80:
-                        jpeg = await asyncio.to_thread(self.get_jpeg_bytes, overlay, target_width, quality) or self._standby_jpeg
+                        jpeg = await asyncio.to_thread(self.get_jpeg_bytes, overlay, target_width, quality)
+                        if not jpeg:
+                            jpeg, fid = self._standby_jpeg, -1
                     last_fid = fid
                     yield (
                         b"--frame\r\n"
                         b"Content-Type: image/jpeg\r\n"
-                        b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
+                        + b"X-Camera-Live: " + (b"true" if fid >= 0 else b"false") + b"\r\n"
+                        + b"X-Frame-Id: " + str(fid).encode() + b"\r\n"
+                        + b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
                         + jpeg
                         + b"\r\n"
                     )
@@ -599,8 +616,7 @@ class CameraStream:
         """Returns the latest uncompressed full-resolution raw frame for AI inference."""
         now = time.time()
         with self.raw_cond:
-            if self.latest_raw_frame is not None and (now - self.last_frame_time) < 4.0:
-                self.is_connected = True
+            if self.is_connected and self.latest_raw_frame is not None and (now - self.last_frame_time) < 4.0:
                 return self.latest_raw_frame.copy()
             self.is_connected = False
             self.fps = 0.0
@@ -632,8 +648,15 @@ class CameraStream:
 class StreamManager:
     def __init__(self):
         self.streams: Dict[int, CameraStream] = {}
+        self._registry_lock = threading.RLock()
 
     def get_or_create(self, camera_id: int, rtsp_url: str, camera_name: str = "Camera") -> CameraStream:
+        # Registration runs in FastAPI worker threads. Concurrent requests must
+        # share one capture instead of starting unregistered duplicate readers.
+        with self._registry_lock:
+            return self._get_or_create(camera_id, rtsp_url, camera_name)
+
+    def _get_or_create(self, camera_id: int, rtsp_url: str, camera_name: str) -> CameraStream:
         if camera_id in self.streams:
             stream = self.streams[camera_id]
             stream.camera_name = camera_name
@@ -653,6 +676,10 @@ class StreamManager:
         return self.streams.get(camera_id)
 
     def restart_camera(self, camera_id: int) -> Optional[CameraStream]:
+        with self._registry_lock:
+            return self._restart_camera(camera_id)
+
+    def _restart_camera(self, camera_id: int) -> Optional[CameraStream]:
         if camera_id in self.streams:
             stream = self.streams[camera_id]
             stream.stop()

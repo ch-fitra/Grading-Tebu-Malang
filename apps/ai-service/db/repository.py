@@ -7,7 +7,6 @@ from contextlib import closing
 from typing import Dict, Any, Optional, List
 from db.connection import get_ai_db_connection, get_auth_db_connection
 from psycopg2.extras import RealDictCursor
-from grading_policy import UNKNOWN_GRADE, grading_threshold, apply_history_policy
 
 logger = logging.getLogger("ai_repository")
 
@@ -39,19 +38,6 @@ class AIRepository:
                         is_active=EXCLUDED.is_active,updated_at=NOW()""",
                         (camera["id"], f"CAM_API_{camera['id']}", camera["name"], camera["rtsp_url"],
                          camera["location"], bool(camera["enabled"] and camera["rtsp_url"])))
-                    # Upgrade the old default; preserve custom operator calibration.
-                    template = malang_roi(camera["id"], camera["station"])
-                    if template is not None:
-                        cursor.execute("""UPDATE ai_cameras SET roi_config=%s WHERE id=%s AND (roi_config IS NULL OR
-                            (roi_config->>'x'='0.58' AND roi_config->>'y'='0.08'
-                             AND roi_config->>'width'='0.39' AND roi_config->>'height'='0.62'))""",
-                                       (json.dumps(template), camera["id"]))
-                        # Add the new region without replacing grading calibration
-                        # or an operator's explicit incoming=null/disabled setting.
-                        cursor.execute("""UPDATE ai_cameras
-                            SET roi_config=jsonb_set(roi_config, '{incoming}', %s::jsonb), updated_at=NOW()
-                            WHERE id=%s AND roi_config IS NOT NULL AND NOT (roi_config ? 'incoming')""",
-                                       (json.dumps(template["incoming"]), camera["id"]))
 
     @staticmethod
     def history_summary(camera_ids: List[int], start_at=None, end_at=None, search: str = "") -> Dict[str, Any]:
@@ -124,6 +110,7 @@ class AIRepository:
                     "id": int(row["id"]), "cameraId": int(row["camera_id"]),
                     "timestamp": row["created_at"].isoformat(), "grade": row["grade"],
                     "classes": {"daun": float(row["daun_percent"]), "pucuk": float(row["pucuk_percent"]), "sampah": float(row["sampah_percent"])},
+                    "modelOutput": row.get("model_output"),
                     "confidence": float(row["confidence"]), "snapshot": row["snapshot_path"],
                     "frameNumber": int(row["frame_number"]),
                     "impurityMeasured": row["impurity_measured"] is True,
@@ -142,8 +129,7 @@ class AIRepository:
                     item["grade"] = detection["detected_class"]
                     if not any(key in (detection["classes_score"] or {}) for key in ("daun", "pucuk", "sampah")):
                         item["classScores"] = detection["classes_score"]
-        threshold = grading_threshold()
-        return {"items": [apply_history_policy(item, threshold) for item in items], "total": total, "page": page, "page_size": page_size, "pages": pages}
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
 
     @staticmethod
     def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
@@ -218,201 +204,3 @@ class AIRepository:
             return False
 
     # --- Cycle Scanning Management (to DB: sugarcane_ai) ---
-    @staticmethod
-    def create_auto_inspection(camera_id: int, cycle_code: str):
-        """Use the existing dashboard inspection schema without changing the API service."""
-        with closing(get_auth_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM truck_inspections WHERE line = %s AND status = 'active'", (camera_id,))
-                if cursor.fetchone():
-                    raise RuntimeError("Masih ada siklus aktif pada kamera ini")
-                cursor.execute("""
-                    INSERT INTO truck_inspections (id, truck_code, line, status, notes)
-                    VALUES (%s, %s, %s, 'active', %s)
-                """, (cycle_code, "Siklus Auto " + cycle_code[:8], camera_id,
-                      "[AUTO_FRAME] Full frame 3 detik; grading maksimum 30 detik"))
-
-    @staticmethod
-    def has_running_cycle(camera_id: int) -> bool:
-        with closing(get_ai_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1 FROM ai_results WHERE camera_id = %s AND status = 'running' LIMIT 1", (camera_id,))
-                return cursor.fetchone() is not None
-
-    @staticmethod
-    def has_active_inspection(camera_id: int) -> bool:
-        with closing(get_auth_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1 FROM truck_inspections WHERE line = %s AND status = 'active' LIMIT 1", (camera_id,))
-                return cursor.fetchone() is not None
-
-    @staticmethod
-    def discard_auto_inspection(cycle_code: str):
-        with closing(get_auth_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM truck_inspections WHERE id = %s AND notes LIKE '[AUTO_FRAME]%%'", (cycle_code,))
-
-    @staticmethod
-    def complete_auto_inspection(cycle_code: str, summary: Dict[str, Any]):
-        grade = summary.get("majority_class")
-        decision = ("MBS" if grade in ("MBS", "MBS Bintang", "MBS Plus") else "NON_MBS" if grade == "Non MBS" else "PENDING")
-        with closing(get_auth_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    UPDATE truck_inspections SET status = 'completed', completed_at = COALESCE(completed_at, NOW()),
-                        final_decision = %s, average_impurity = %s, average_confidence = %s
-                    WHERE id = %s AND notes LIKE '[AUTO_FRAME]%%'
-                """, (decision, summary.get("avg_total_impurity") or 0,
-                      summary.get("confidence_avg") or 0, cycle_code))
-
-    @staticmethod
-    def unfinished_auto_inspections() -> List[str]:
-        with closing(get_auth_db_connection()) as conn, conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM truck_inspections WHERE status = 'active' AND notes LIKE '[AUTO_FRAME]%%'")
-                return [str(row[0]) for row in cursor.fetchall()]
-
-    @staticmethod
-    def start_cycle(camera_id: int, model_version: str, cycle_code: Optional[str] = None) -> Dict[str, Any]:
-        from datetime import datetime, timezone
-        from uuid import uuid4
-        if not cycle_code:
-            cycle_code = f"CYC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
-        try:
-            with closing(get_ai_db_connection()) as conn, conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                    # Ensure camera_id exists
-                    cursor.execute("""
-                        INSERT INTO ai_cameras (id, camera_code, name, rtsp_url, location)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO NOTHING;
-                    """, (camera_id, f"CAM_{camera_id}", f"Camera #{camera_id}", "http://127.0.0.1", "Meja Tebu"))
-
-                    cursor.execute("""
-                        INSERT INTO ai_results (cycle_code, camera_id, model_version, status, start_time)
-                        VALUES (%s, %s, %s, 'running', NOW())
-                        RETURNING *;
-                    """, (cycle_code, camera_id, model_version))
-                    res = dict(cursor.fetchone())
-                    conn.commit()
-                    return res
-        except Exception as e:
-            logger.error(f"Error starting cycle in sugarcane_ai: {e}")
-            raise
-
-    @staticmethod
-    def stop_cycle(cycle_code: str) -> Optional[Dict[str, Any]]:
-        try:
-            with closing(get_ai_db_connection()) as conn, conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                    # Resolve active running cycle if cycle_code matches exact code or camera_id string or latest running cycle
-                    cursor.execute("""
-                        SELECT cycle_code FROM ai_results 
-                        WHERE cycle_code = %s OR (status = 'running' AND camera_id::text = %s)
-                        ORDER BY id DESC LIMIT 1;
-                    """, (cycle_code, cycle_code))
-                    found = cursor.fetchone()
-                    if found:
-                        cycle_code = found["cycle_code"]
-
-                    # Calculate aggregated metrics from raw inference results
-                    cursor.execute("""
-                        SELECT 
-                            COUNT(*) as total_frames,
-                            AVG(total_impurity) as avg_impurity,
-                            AVG(confidence) as avg_confidence,
-                            MODE() WITHIN GROUP (ORDER BY CASE WHEN confidence >= %s THEN detected_class ELSE %s END) as majority_class,
-                            (SELECT snapshot_path FROM ai_inference_results WHERE cycle_code = %s ORDER BY confidence DESC LIMIT 1) as best_snapshot,
-                            (SELECT json_agg(snapshot_path) FROM ai_inference_results WHERE cycle_code = %s AND snapshot_path IS NOT NULL) as all_snapshots
-                        FROM ai_inference_results
-                        WHERE cycle_code = %s;
-                    """, (grading_threshold(), UNKNOWN_GRADE, cycle_code, cycle_code, cycle_code))
-                    agg = cursor.fetchone()
-
-                    if not agg or agg["total_frames"] == 0:
-                        cursor.execute("""
-                            UPDATE ai_results
-                            SET status = 'completed', end_time = COALESCE(end_time, NOW())
-                            WHERE cycle_code = %s
-                            RETURNING *;
-                        """, (cycle_code,))
-                    else:
-                        cursor.execute("""
-                            UPDATE ai_results
-                            SET status = 'completed',
-                                end_time = COALESCE(end_time, NOW()),
-                                total_frames_scanned = %s,
-                                avg_total_impurity = ROUND(%s::numeric, 2),
-                                confidence_avg = ROUND(%s::numeric, 4),
-                                majority_class = %s,
-                                best_snapshot_path = %s,
-                                snapshot_paths = %s
-                            WHERE cycle_code = %s
-                            RETURNING *;
-                        """, (
-                            agg["total_frames"], agg["avg_impurity"],
-                            agg["avg_confidence"], agg["majority_class"],
-                            agg["best_snapshot"], json.dumps(agg["all_snapshots"] or []), cycle_code
-                        ))
-
-                    res = dict(cursor.fetchone()) if cursor.rowcount else None
-                    conn.commit()
-                    return res
-        except Exception as e:
-            logger.error(f"Error stopping cycle in sugarcane_ai: {e}")
-            return None
-
-    @staticmethod
-    def save_inference_result(
-        camera_id: int,
-        model_version: str,
-        snapshot_path: str,
-        classes_score: Dict[str, float],
-        total_impurity: Optional[float],
-        detected_class: str,
-        confidence: float,
-        image_blob: Optional[bytes] = None,
-        cycle_id: Optional[int] = None,
-        cycle_code: Optional[str] = None,
-        captured_at: Optional[str] = None
-    ) -> Optional[int]:
-        try:
-            with closing(get_ai_db_connection()) as conn, conn:
-                with conn.cursor() as cursor:
-                    # Auto-link to active running cycle if cycle_code was not explicitly supplied
-                    if not cycle_code:
-                        cursor.execute("""
-                            SELECT id, cycle_code FROM ai_results 
-                            WHERE camera_id = %s AND status = 'running' 
-                            ORDER BY id DESC LIMIT 1;
-                        """, (camera_id,))
-                        active_cycle = cursor.fetchone()
-                        if active_cycle:
-                            cycle_id = active_cycle[0]
-                            cycle_code = active_cycle[1]
-
-                    cursor.execute("""
-                        INSERT INTO ai_cameras (id, camera_code, name, rtsp_url, location)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO NOTHING;
-                    """, (camera_id, f"CAM_{camera_id}", f"Camera #{camera_id}", "http://127.0.0.1", "Meja Tebu"))
-
-                    cursor.execute("""
-                        INSERT INTO ai_inference_results (
-                            cycle_id, cycle_code, camera_id, model_version, snapshot_path, image_blob,
-                            classes_score, total_impurity, detected_class,
-                            confidence, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, NOW()))
-                        RETURNING id;
-                    """, (
-                        cycle_id, cycle_code, camera_id, model_version, snapshot_path,
-                        image_blob, json.dumps(classes_score),
-                        total_impurity, detected_class,
-                        confidence, captured_at
-                    ))
-                    result = cursor.fetchone()
-                    conn.commit()
-                    return result[0] if result else None
-        except Exception as e:
-            logger.error(f"Error saving inference result to sugarcane_ai: {e}")
-            return None

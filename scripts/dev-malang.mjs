@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import dotenv from 'dotenv';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const env = {...process.env, ...dotenv.parse(fs.readFileSync(path.join(root,'.env'))), NODE_ENV:'development'};
+// OpenCV on Windows must inherit transport options before Python/OpenCV starts.
+env.OPENCV_FFMPEG_CAPTURE_OPTIONS ??= 'rtsp_transport;tcp|analyzeduration;1000000|probesize;32768';
 if (env.INSTALLATION_ID !== 'malang') throw new Error('Wrong installation');
 // Check every port first; never reuse a Trangkil or other application's process.
 for (const port of [4111,5176,8011]) await new Promise((resolve,reject) => {
@@ -55,7 +57,7 @@ async function waitReady(name, child, url, timeoutMs = 120000) {
       const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
       const health = await response.json();
       if (response.ok && health.installation === 'malang' && health.status === 'ok') {
-        console.log(`[dev:${name}] Ready${health.execution ? `; inference device=${health.execution.torch_device}` : ''}`);
+        console.log(`[dev:${name}] Ready`);
         return;
       }
     } catch { /* The process can still be importing dependencies. */ }

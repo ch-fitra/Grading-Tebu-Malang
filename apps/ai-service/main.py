@@ -4,110 +4,72 @@ import os
 import hmac
 import hashlib
 import logging
-import threading
 import json
+import time
+import threading
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Literal
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from contextlib import asynccontextmanager
-from functools import lru_cache
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-from uuid import uuid4
-from typing import Dict, List, Optional, Tuple, Literal
-
-os.environ.setdefault("KERAS_BACKEND", "torch")
-os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
-import torch
-torch._dynamo.config.suppress_errors = True
-torch.set_num_threads(int(os.getenv("AI_TORCH_THREADS", "2")))
-
-logger = logging.getLogger("ai_service")
-from inference_device import torch_device, execution_status, onnx_providers
 
 import cv2
-import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Response, Header, Request as FastAPIRequest
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
-
-from streamer import (
-    DEFAULT_ROIS,
-    ROIModel,
-    crop_incoming_roi,
-    load_all_rois,
-    invalidate_rois,
-    save_roi,
-    stream_manager,
-)
-
-from db.migrations import run_ai_migrations
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from streamer import DEFAULT_ROIS, ROIModel, load_all_rois, invalidate_rois, save_roi, stream_manager
 from db.repository import AIRepository
-from auto_cycle import AutoCycleController
-from grading_policy import UNKNOWN_GRADE, accepted_grade
+from inference import grading_model, frame_model
+from grading_runtime import CameraGrading
 
-try:
-    import onnxruntime as ort
-except Exception:  # pragma: no cover
-    ort = None
-
+logger = logging.getLogger("camera_service")
 AI_SERVICE_DIR = Path(__file__).resolve().parent
 ROOT = AI_SERVICE_DIR.parents[1]
-
-MODEL_DIR = AI_SERVICE_DIR / "models" / "active"
-CONFIG_PATH = MODEL_DIR / "config.json"
-if not CONFIG_PATH.exists():
-    CONFIG_PATH = ROOT / "models" / "active" / "config.json"
-
 SNAPSHOTS_DIR = Path(os.getenv("AI_SNAPSHOTS_DIR", str(AI_SERVICE_DIR / "storage" / "snapshots")))
 if not SNAPSHOTS_DIR.is_absolute():
     SNAPSHOTS_DIR = ROOT / SNAPSHOTS_DIR
 SNAPSHOTS_DIR = SNAPSHOTS_DIR.resolve()
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+controllers = {}
 
-from fastapi.staticfiles import StaticFiles
+def controller(camera_id):
+    # Registry creation is protected across concurrent FastAPI worker threads.
+    with controller_lock:
+        if camera_id not in controllers:
+            controllers[camera_id] = CameraGrading(camera_id, SNAPSHOTS_DIR)
+        return controllers[camera_id]
+
+controller_lock = threading.RLock()
+AI_MESSAGE = "Model grading resmi Malang"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Inference runtime: %s", execution_status())
-    # Run Native DB Migrations for sugarcane_ai
-    run_ai_migrations()
-
-    # Load active cameras 100% from database sugarcane_ai
-    AIRepository.sync_application_cameras()
-    cameras = AIRepository.get_active_cameras()
-    if cameras:
-        for cam in cameras:
-            if cam.get("rtsp_url"):
-                stream_manager.get_or_create(cam["id"], cam["rtsp_url"], cam["name"])
-    else:
-        logger.warning("Tidak ada kamera aktif; periksa koneksi database dan konfigurasi kamera")
-
-    try:
-        # A service restart never leaves an automatic dashboard cycle marked active.
+    for model in (grading_model, frame_model):
         try:
-            for code in AIRepository.unfinished_auto_inspections():
-                summary = AIRepository.stop_cycle(code)
-                if summary:
-                    AIRepository.complete_auto_inspection(code, summary)
+            model.load()
         except Exception:
-            logger.exception("Could not recover interrupted automatic cycles; Auto will require database availability")
+            logger.exception("Model resmi gagal dimuat: %s", model.path.name)
+    try:
+        AIRepository.sync_application_cameras()
+        for camera in AIRepository.get_active_cameras():
+            if camera.get("rtsp_url"):
+                stream_manager.get_or_create(camera["id"], camera["rtsp_url"], camera["name"])
+    except Exception:
+        logger.exception("Konfigurasi kamera belum tersedia")
+    try:
         yield
     finally:
-        for controller in list(_auto_controllers.values()):
+        for runtime in list(controllers.values()):
             try:
-                controller.shutdown()
+                runtime.shutdown()
             except Exception:
-                logger.exception("Could not finalize automatic cycle during shutdown")
-        for event, thread in list(_active_cycle_workers.values()):
-            event.set()
-            thread.join(timeout=30)
+                logger.exception("Gagal menyelesaikan siklus saat shutdown")
         stream_manager.stop_all()
 
-app = FastAPI(title="Tebu AI Service", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Tebu Camera Service", version="1.0.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def internal_service_access(request: FastAPIRequest, call_next):
@@ -132,333 +94,23 @@ app.add_middleware(
 )
 
 
-class InferRequest(BaseModel):
-    image_path: Optional[str] = None
-    camera_id: Optional[int] = None
-    crop_roi: bool = True
-    cycle_id: Optional[int] = None
-    cycle_code: Optional[str] = None
-
-
-class StartCycleRequest(BaseModel):
-    camera_id: int = Field(gt=0)
-    cycle_code: Optional[str] = None
-
-
-class StopCycleRequest(BaseModel):
-    cycle_code: str
-
-
-class ModelConfig(BaseModel):
-    name: str
-    version: str
-    type: str
-    input_size: int = Field(gt=0, le=4096)
-    classes: List[str] = Field(min_length=1)
-    threshold: float = Field(0.5, ge=0, le=1)
-    output_activation: Literal["probabilities", "sigmoid", "softmax"] = "probabilities"
-    input_color: Literal["rgb", "bgr"] = "rgb"
-    model_path: str = "models/active/model.onnx"
-    frame_input: Literal["incoming_roi", "embedded_roi"] = "incoming_roi"
-
-    @field_validator("classes")
-    @classmethod
-    def unique_classes(cls, names):
-        if any(not name.strip() or name != name.strip() for name in names) or len(set(names)) != len(names):
-            raise ValueError("Nama kelas harus unik, tidak kosong, dan tanpa spasi tepi")
-        if any(name in (UNKNOWN_GRADE, "Perlu Pemeriksaan") for name in names):
-            raise ValueError("Status pengenalan bukan label dataset")
-        return names
+@app.api_route("/health", methods=["GET", "HEAD"])
+def health():
+    return {
+        "status": "ok", "service": "ai-service", "installation": "malang",
+        "ai_status": "ready" if grading_model.model is not None else "error", "message": grading_model.error or AI_MESSAGE,
+        "capabilities": {"conveyor_empty": False, "auto_cycle": grading_model.model is not None and frame_model.model is not None, "independent_visual_similarity": False},
+        "model": grading_model.status(), "frame_model": frame_model.status(),
+        "cameras": {str(camera_id): {"live": stream.is_connected and time.time() - stream.last_frame_time < 4.0,
+                                   "fps": round(stream.fps, 1) if stream.is_connected and time.time() - stream.last_frame_time < 4.0 else 0.0}
+                    for camera_id, stream in list(stream_manager.streams.items())},
+    }
 
 
 class CameraRegisterPayload(BaseModel):
     camera_id: int
     rtsp_url: str
     camera_name: str = "Camera"
-
-
-def load_config() -> ModelConfig:
-    path = AI_SERVICE_DIR / "models" / "active" / "config.json"
-    if not path.exists():
-        path = ROOT / "models" / "active" / "config.json"
-    if not path.exists():
-        raise HTTPException(status_code=500, detail="models/active/config.json not found")
-    return ModelConfig.model_validate_json(path.read_text(encoding="utf-8"))
-
-
-_session_lock = threading.Lock()
-_session_key = None
-_session = None
-_sessions = {}
-_inference_lock = threading.RLock()
-
-
-def configured_model_path(config: ModelConfig) -> Path:
-    value = config.model_path.replace("\\", "/")
-    base = ROOT if value.startswith(("apps/ai-service/", "models/archive/")) else AI_SERVICE_DIR
-    path = (base / value).resolve()
-    roots = [(AI_SERVICE_DIR / "models").resolve(), (ROOT / "models" / "archive").resolve()]
-    if not any(path.is_relative_to(root) for root in roots) or path.suffix.lower() not in [".onnx", ".keras", ".h5"]:
-        raise HTTPException(status_code=400, detail="Lokasi model tidak valid. Hanya mendukung .onnx, .keras, atau .h5")
-    return path
-
-
-@lru_cache(maxsize=8)
-def _artifact_hash(path: str, modified_ns: int, size: int) -> str:
-    # mtime and size invalidate this cache when the deployed artifact changes.
-    digest = hashlib.sha256()
-    with open(path, "rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def model_fingerprint(config: ModelConfig) -> str:
-    path = configured_model_path(config)
-    stat = path.stat()
-    return _artifact_hash(str(path), stat.st_mtime_ns, stat.st_size)
-
-
-def model_session(config: ModelConfig):
-    global _session, _session_key
-    path = configured_model_path(config)
-    if not path.is_file():
-        raise HTTPException(status_code=503, detail="File model belum tersedia")
-    key = (str(path), path.stat().st_mtime_ns)
-    with _session_lock:
-        if key not in _sessions:
-            if path.suffix.lower() in [".keras", ".h5"]:
-                import keras
-                candidate = keras.models.load_model(str(path), compile=False)
-                if keras.backend.backend() != "torch":
-                    raise RuntimeError("This runtime requires KERAS_BACKEND=torch")
-                candidate.to(torch_device())
-            else:
-                if ort is None:
-                    raise HTTPException(status_code=503, detail="onnxruntime belum terpasang")
-                candidate = ort.InferenceSession(str(path), providers=onnx_providers(ort))
-                if torch_device().startswith("cuda") and candidate.get_providers()[0] != "CUDAExecutionProvider":
-                    raise RuntimeError("ONNX CUDA initialization failed; refusing silent CPU fallback")
-            # Keep frame and grading models resident independently.
-            for old_key in list(_sessions):
-                if old_key[0] == str(path):
-                    del _sessions[old_key]
-            _sessions[key] = candidate
-        _session = _sessions[key]
-        _session_key = key
-        return _session
-
-
-class ActivateModelPayload(BaseModel):
-    name: str
-    version: str
-    model_path: str
-
-
-@app.post("/models/activate")
-def activate_model(payload: ActivateModelPayload):
-    config = load_config().model_copy(update=payload.model_dump())
-    model_session(config)  # Validate the file before changing active configuration.
-    # Loading a file alone does not validate its output or preprocessing contract.
-    run_onnx_inference(np.zeros((config.input_size, config.input_size, 3), dtype=np.uint8), config)
-    temporary = CONFIG_PATH.with_name(f"config.{uuid4().hex}.tmp")
-    try:
-        temporary.write_text(config.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(temporary, CONFIG_PATH)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return {"status": "ok", "model": config.name, "version": config.version}
-
-
-def classification_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[Dict[str, float], float]:
-    arr = np.asarray(output, dtype=np.float32)
-    if arr.ndim == 2 and arr.shape[0] == 1:
-        arr = arr[0]
-    if arr.ndim != 1 or arr.shape[0] != len(config.classes):
-        # Fallback to segmentation if output shape matches segmentation
-        if arr.ndim == 3 or (np.asarray(output).ndim == 4 and np.asarray(output).shape[0] == 1):
-            return segmentation_measurement(output, config)
-        raise HTTPException(status_code=422, detail=f"Output model klasifikasi harus 1D tensor berukuran [{len(config.classes)}]")
-    
-    if not np.isfinite(arr).all():
-        raise HTTPException(status_code=422, detail="Output model mengandung nilai tidak valid")
-    if config.output_activation == "softmax":
-        exp_arr = np.exp(arr - np.max(arr))
-        arr = exp_arr / exp_arr.sum()
-    elif config.output_activation == "sigmoid":
-        arr = 1.0 / (1.0 + np.exp(-np.clip(arr, -80, 80)))
-    elif arr.min() < 0 or arr.max() > 1:
-        raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
-    if config.output_activation == "probabilities" and not np.isclose(arr.sum(), 1.0, atol=1e-4):
-        raise HTTPException(status_code=422, detail="Probabilitas klasifikasi harus berjumlah 1; gunakan kontrak sigmoid untuk output independen")
-    
-    # Scale to percentage (0.0 - 100.0%)
-    classes = {name: float(prob) * 100 for name, prob in zip(config.classes, arr)}
-    max_confidence = float(np.max(arr))
-    return classes, max_confidence
-
-
-def segmentation_measurement(output: np.ndarray, config: ModelConfig) -> Tuple[Dict[str, float], float]:
-    masks = np.asarray(output, dtype=np.float32)
-    if masks.ndim == 4 and masks.shape[0] == 1:
-        masks = masks[0]
-    if masks.ndim == 1:
-        return classification_measurement(output, config)
-    if config.type != "segmentation" or masks.ndim != 3 or masks.shape[0] != len(config.classes) or masks.size == 0 or not np.isfinite(masks).all():
-        raise HTTPException(status_code=422, detail="Output model harus berupa peta segmentasi [1, kelas, tinggi, lebar] sesuai konfigurasi")
-    if config.output_activation == "sigmoid":
-        masks = 1.0 / (1.0 + np.exp(-np.clip(masks, -80, 80)))
-    elif config.output_activation == "softmax":
-        shifted = masks - masks.max(axis=0, keepdims=True)
-        masks = np.exp(shifted)
-        masks /= masks.sum(axis=0, keepdims=True)
-    elif masks.min() < 0 or masks.max() > 1:
-        raise HTTPException(status_code=422, detail="Output bukan probabilitas. Sesuaikan output_activation pada konfigurasi model")
-    scores = masks.max(axis=0)
-    winners = masks.argmax(axis=0)
-    confident = scores > config.threshold
-    classes = {name: round(float(np.mean((winners == index) & confident)) * 100, 2) for index, name in enumerate(config.classes)}
-    return classes, round(float(scores.mean()), 4)
-
-
-def measurement_result(classes: Dict[str, float], config: ModelConfig) -> Tuple[Dict[str, float], Optional[float], str, bool]:
-    """Keep grade probabilities distinct from measured segmentation area."""
-    if config.type == "classification":
-        scores = {grade: float(value) for grade, value in classes.items()
-                  if grade in config.classes}
-        if not scores:
-            raise HTTPException(status_code=422, detail="Model grading tidak menghasilkan kelas mutu yang dikenali")
-        candidate = max(scores, key=scores.get)
-        grade = accepted_grade(candidate, scores[candidate] / 100, config.threshold)
-        return scores, None, grade, False
-    raise HTTPException(status_code=422, detail="Grading Malang memerlukan hasil klasifikasi sesuai kelas model aktif")
-
-
-def run_onnx_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
-    with _inference_lock:
-        return _run_model_inference(image, config)
-
-
-def keras_input_pixels(image, config):
-    """Shared by live classification and offline embedding evaluation (BGR crop in)."""
-    pixels = np.asarray(image)
-    if pixels.ndim != 3 or pixels.shape[2] != 3 or not pixels.size or pixels.dtype != np.uint8:
-        raise ValueError("Input Keras harus gambar BGR uint8 [tinggi, lebar, 3], rentang 0-255")
-    resized = cv2.resize(image, (config.input_size, config.input_size))
-    if config.input_color == "rgb":
-        resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    # Active Keras model owns Rescaling; do not normalize a second time.
-    return np.expand_dims(resized.astype("float32"), axis=0)
-
-
-def validate_keras_classification_contract(model, config):
-    """Validate executable shape/activation, not the unavailable training label order."""
-    expected_input = (None, config.input_size, config.input_size, 3)
-    if tuple(model.input_shape) != expected_input:
-        raise ValueError(f"Input model {model.input_shape} tidak sesuai kontrak NHWC {expected_input}")
-    if tuple(model.output_shape) != (None, len(config.classes)):
-        raise ValueError("Jumlah output checkpoint tidak sesuai seluruh kelas konfigurasi")
-    activation = getattr(getattr(model.layers[-1], "activation", None), "__name__", None)
-    if config.output_activation in ("softmax", "sigmoid") and activation not in (None, "linear"):
-        raise ValueError("Aktivasi output sudah berada di model; menambah aktivasi layanan akan mengubah skor")
-
-
-@lru_cache(maxsize=8)
-def _keras_feature_probe(model, device):
-    """Reuse the same learned tensors. No new weights, reference prototypes, or training."""
-    import keras
-    last = model.layers[-1]
-    if not isinstance(last, keras.layers.Dense) or len(last.input.shape) != 2:
-        raise ValueError("Checkpoint tidak mengekspos vektor fitur sebelum Dense klasifikasi")
-    with keras.device(device):
-        return keras.Model(model.inputs, [last.input, model.output])
-
-
-def keras_raw_inference(image, config, include_features=False):
-    """Actual pre-softmax output and optional penultimate features, never similarity.
-
-    The final Dense columns are discriminative classifier weights, not verified
-    class-image references. Extracting features alone cannot create a matching %.
-    """
-    import keras
-    with _inference_lock:
-        model = model_session(config)
-        if config.type == "classification":
-            validate_keras_classification_contract(model, config)
-        device = torch_device()
-        runner = _keras_feature_probe(model, device) if include_features else model
-        tensor = torch.as_tensor(keras_input_pixels(image, config), device=device)
-        # .to('cpu') alone does not force Keras execution to CPU on a CUDA host.
-        with keras.device(device), torch.no_grad():
-            output = runner(tensor, training=False)
-        if include_features:
-            features, output = output
-            features = features.detach().cpu().numpy()
-            if features.ndim != 2 or features.shape[0] != 1 or not np.isfinite(features).all():
-                raise ValueError("Vektor fitur model tidak valid")
-        raw = output.detach().cpu().numpy()
-        if not np.isfinite(raw).all():
-            raise ValueError("Output checkpoint tidak finite")
-        return (raw, features) if include_features else raw
-
-
-def _run_model_inference(image: cv2.typing.MatLike, config: ModelConfig) -> Tuple[Dict[str, float], float]:
-    path = configured_model_path(config)
-    
-    # If model is .keras / .h5, handle via Keras runner
-    if path.suffix.lower() in [".keras", ".h5"]:
-        try:
-            preds = keras_raw_inference(image, config)
-            if config.type == "classification":
-                return classification_measurement(preds, config)
-            return segmentation_measurement(preds, config)
-        except Exception as e:
-            logger.error(f"Keras execution error: {e}")
-            raise HTTPException(status_code=500, detail=f"Gagal menjalankan model Keras: {e}")
-
-    session = model_session(config)
-    resized = cv2.resize(image, (config.input_size, config.input_size))
-    if config.input_color == "rgb":
-        resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    tensor = resized.astype("float32") / 255.0
-    tensor = tensor.transpose(2, 0, 1)[None, ...]
-
-    input_name = session.get_inputs()[0].name
-    outputs = session.run(None, {input_name: tensor})
-
-    if config.type == "classification":
-        return classification_measurement(outputs[0], config)
-    return segmentation_measurement(outputs[0], config)
-
-
-@app.api_route("/health", methods=["GET", "HEAD"])
-def health():
-    config = load_config()
-    return {
-        "status": "ok",
-        "service": "ai-service",
-        "execution": execution_status(),
-        "installation": "malang",
-        "capabilities": {"conveyor_empty": False, "auto_cycle": FRAME_CONFIG_PATH.is_file(),
-                         "independent_visual_similarity": False},
-        "model": {
-            "name": config.name,
-            "version": config.version,
-            "confidence_threshold": config.threshold,
-            "sha256": model_fingerprint(config) if configured_model_path(config).is_file() else None,
-            "output_activation": config.output_activation,
-            "input_color": config.input_color,
-            "class_order_source": "configuration_only",
-            "classes": config.classes,
-            "score_kind": "classification_probability" if config.type == "classification" else "segmentation_area",
-            "similarity_calibration_available": False,
-            "similarity_unavailable_reason": "Checkpoint classifier tidak menyertakan bank referensi fitur per kelas atau kalibrasi kemiripan",
-            "available": configured_model_path(config).is_file() and (configured_model_path(config).suffix.lower() in (".keras", ".h5") or ort is not None),
-        },
-        "cameras": {str(camera_id): {"live": stream.is_connected and time.time() - stream.last_frame_time < 4.0,
-                                  "fps": round(stream.fps, 1) if time.time() - stream.last_frame_time < 4.0 else 0.0}
-                    for camera_id, stream in list(stream_manager.streams.items())},
-    }
 
 
 @app.post("/stream/{camera_id}/reconnect")
@@ -561,39 +213,9 @@ def register_camera(payload: CameraRegisterPayload):
     }
 
 
-@app.delete("/cameras/{camera_id}")
-def deactivate_camera(camera_id: int):
-    controller = _auto_controller(camera_id)
-    with controller.lock:
-        controller.set_enabled(False)
-        AIRepository.deactivate_camera(camera_id)
-        invalidate_rois()
-        stream = stream_manager.streams.pop(camera_id, None)
-        if stream:
-            stream.stop()
-    return {"status": "ok"}
-
-
-_active_cycle_workers: Dict[str, Tuple[threading.Event, threading.Thread]] = {}
-_workers_lock = threading.Lock()
-_lifecycle_lock = threading.RLock()
-_auto_controllers: Dict[int, AutoCycleController] = {}
-_controllers_lock = threading.Lock()
-_automatic_cycle_codes = set()
-FRAME_CONFIG_PATH = MODEL_DIR / "frame_config.json"
-
-
-class AutoModeRequest(BaseModel):
-    enabled: bool
-
-
-def load_frame_config() -> ModelConfig:
-    return ModelConfig.model_validate_json(FRAME_CONFIG_PATH.read_text(encoding="utf-8"))
-
-
 def _authorized_cameras(authorization: Optional[str], permission: Optional[str] = None, operator_only: bool = False):
     """Reuse the API's session and factory access checks; never trust UI permissions."""
-    base = os.getenv("AUTO_CYCLE_API_URL", f"http://127.0.0.1:{os.getenv('API_PORT', os.getenv('BACKEND_PORT', '4111'))}").rstrip("/")
+    base = os.getenv("SUGARCANE_API_URL", f"http://127.0.0.1:{os.getenv('API_PORT', os.getenv('BACKEND_PORT', '4111'))}").rstrip("/")
     try:
         def read(path):
             request = Request(base + path, headers={"Authorization": authorization or ""})
@@ -653,339 +275,79 @@ def history_page(
     return AIRepository.history_page(camera_id, page, page_size, cycle_code)
 
 
-def _frame_detection_image(camera_id, image, config=None):
-    config = config or load_frame_config()
-    # Models with a built-in spatial crop must see the original full frame.
-    if config.frame_input == "embedded_roi":
-        return image
-    roi = load_all_rois().get(camera_id)
-    if roi and roi.incoming and roi.incoming.enabled:
-        return crop_incoming_roi(image, roi.incoming)
-    return image
+@app.delete("/cameras/{camera_id}")
+def deactivate_camera(camera_id: int):
+    AIRepository.deactivate_camera(camera_id)
+    invalidate_rois()
+    stream = stream_manager.streams.pop(camera_id, None)
+    if stream:
+        stream.stop()
+    return {"status": "ok"}
 
 
-def _detection_region(camera_id):
-    if load_frame_config().frame_input == "embedded_roi":
-        return "model_roi"
-    roi = load_all_rois().get(camera_id)
-    return "incoming" if roi and roi.incoming and roi.incoming.enabled else "full_frame"
-
-
-def _sample_full_frame(camera_id, previous_id):
-    stream = stream_manager.get_stream(camera_id)
-    if not stream or not stream.is_connected:
-        return None, None, None
-    # Copy the original camera image and identity under the same lock, WITHOUT ROI/HUD.
-    with stream.raw_lock:
-        frame_id = (id(stream), stream.raw_frame_id)
-        if frame_id == previous_id or stream.latest_raw_frame is None or time.time() - stream.last_frame_time > 1.5:
-            return frame_id, None, None
-        image = stream.latest_raw_frame.copy()
-    config = load_frame_config()
-    classes, confidence = run_onnx_inference(_frame_detection_image(camera_id, image, config), config)
-    if not np.isfinite(list(classes.values())).all():
-        raise RuntimeError("Output model full frame tidak valid")
-    if confidence < config.threshold:
-        return frame_id, None, confidence
-    return frame_id, classes["full_frame_sugarcane"] > classes["not_full_frame"], confidence
-
-
-def _start_automatic_cycle(camera_id):
-    with _lifecycle_lock:
-        if AIRepository.has_running_cycle(camera_id) or AIRepository.has_active_inspection(camera_id):
-            raise RuntimeError("Tunggu siklus aktif selesai sebelum memulai siklus otomatis")
-        code = str(uuid4())
-        AIRepository.create_auto_inspection(camera_id, code)
-        try:
-            result, deadline = _begin_cycle(StartCycleRequest(camera_id=camera_id, cycle_code=code), duration=50.0, warm=False)
-        except Exception:
-            AIRepository.discard_auto_inspection(code)
-            raise
-        _automatic_cycle_codes.add(code)
-        return result["cycle_code"], deadline
-
-
-def _finish_automatic_cycle(code):
-    summary = _stop_cycle(code)
-    AIRepository.complete_auto_inspection(code, summary)
-    _automatic_cycle_codes.discard(code)
-
-
-def _auto_controller(camera_id):
-    with _controllers_lock:
-        if camera_id not in _auto_controllers:
-            _auto_controllers[camera_id] = AutoCycleController(
-                camera_id, lambda previous: _sample_full_frame(camera_id, previous),
-                lambda: _start_automatic_cycle(camera_id), _finish_automatic_cycle)
-        return _auto_controllers[camera_id]
+class AutoPayload(BaseModel):
+    enabled: bool
 
 
 @app.get("/cycle/auto/{camera_id}")
 def get_auto_mode(camera_id: int, authorization: Optional[str] = Header(None)):
     _authorize_auto(camera_id, authorization)
-    return {**_auto_controller(camera_id).status(), "model_available": configured_model_path(load_frame_config()).is_file(),
-            "detection_region": _detection_region(camera_id)}
+    return controller(camera_id).status()
 
 
 @app.put("/cycle/auto/{camera_id}")
-def set_auto_mode(camera_id: int, payload: AutoModeRequest, authorization: Optional[str] = Header(None)):
+def set_auto_mode(camera_id: int, payload: AutoPayload, authorization: Optional[str] = Header(None)):
     _authorize_auto(camera_id, authorization, write=True)
-    controller = _auto_controller(camera_id)
-    with controller.lock, _lifecycle_lock:
-        if payload.enabled and not controller.enabled:
-            if AIRepository.has_running_cycle(camera_id) or AIRepository.has_active_inspection(camera_id):
-                raise HTTPException(status_code=409, detail="Selesaikan siklus manual sebelum mengaktifkan Auto")
-            stream = stream_manager.get_stream(camera_id)
-            image = stream.get_raw_frame() if stream and stream.is_connected else None
-            if image is None:
-                raise HTTPException(status_code=503, detail="Kamera belum terhubung")
-            # Warm both models before the confirmation/capture clocks start.
-            run_onnx_inference(_frame_detection_image(camera_id, image), load_frame_config())
-            run_onnx_inference(image, load_config())
-        return {**controller.set_enabled(payload.enabled), "model_available": True,
-                "detection_region": _detection_region(camera_id)}
+    try:
+        return controller(camera_id).set_enabled(payload.enabled)
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
-def _cycle_scan_worker(cycle_code: str, camera_id: int, cycle_id: Optional[int], stop_event: threading.Event, deadline: Optional[float] = None):
-    logger.info(f"Started autonomous background cycle scan worker for {cycle_code} (camera #{camera_id})")
-    frame_idx = 0
-    next_capture = time.monotonic()
-    while not stop_event.is_set():
-        if stop_event.wait(max(0.0, next_capture - time.monotonic())):
-            break
-        if deadline is not None and time.monotonic() >= deadline:
-            break
-        next_capture += 1.0
-        try:
-            config = load_config()
-            stream = stream_manager.get_stream(camera_id)
-            if not stream:
-                camera = next((item for item in AIRepository.get_active_cameras() if item["id"] == camera_id), None)
-                if camera and camera.get("rtsp_url"):
-                    stream = stream_manager.get_or_create(camera_id, camera["rtsp_url"], camera["name"])
-
-            all_rois = load_all_rois()
-            roi = all_rois.get(camera_id)
-            image = stream.get_roi_crop(roi) if (roi and roi.enabled and stream and stream.is_connected) else (stream.get_raw_frame() if stream else None)
-
-            if image is None:
-                raise RuntimeError("CCTV frame unavailable; no detection was saved")
-
-            captured_at = datetime.now(timezone.utc).isoformat()
-            frame_idx += 1
-            snapshot_filename = f"frame_{frame_idx:04d}_{uuid4().hex[:6]}.jpg"
-            cycle_folder = SNAPSHOTS_DIR / cycle_code
-            cycle_folder.mkdir(parents=True, exist_ok=True)
-            snapshot_path = cycle_folder / snapshot_filename
-            rel_snapshot_path = f"storage/snapshots/{cycle_code}/{snapshot_filename}"
-
-            # A frame queued behind another inference must not run after the deadline.
-            with _inference_lock:
-                if stop_event.is_set() or (deadline is not None and time.monotonic() >= deadline):
-                    break
-                classes, confidence = run_onnx_inference(image, config)
-            if not cv2.imwrite(str(snapshot_path), image):
-                raise RuntimeError("Failed to persist cycle snapshot")
-
-            mapped_scores, total_impurity, detected_class, _ = measurement_result(classes, config)
-
-            _, encoded_jpg = cv2.imencode(".jpg", image)
-            image_bytes = encoded_jpg.tobytes() if encoded_jpg is not None else None
-
-            result_id = AIRepository.save_inference_result(
-                camera_id=camera_id,
-                model_version=config.version,
-                snapshot_path=rel_snapshot_path,
-                classes_score=mapped_scores,
-                total_impurity=total_impurity,
-                detected_class=detected_class,
-                confidence=confidence,
-                image_blob=image_bytes,
-                cycle_id=cycle_id,
-                cycle_code=cycle_code,
-                captured_at=captured_at
-            )
-            if result_id is None:
-                snapshot_path.unlink(missing_ok=True)
-                raise RuntimeError("Failed to persist cycle detection in database")
-        except Exception as e:
-            logger.error(f"Error in background cycle scan frame processing for {cycle_code}: {e}")
-
-        # Skip missed slots rather than emitting a burst of duplicate captures.
-        if next_capture < time.monotonic():
-            next_capture += int(time.monotonic() - next_capture) + 1
-
-    logger.info(f"Stopped background cycle scan worker for {cycle_code}")
+class CapturePayload(BaseModel):
+    camera_id: int
 
 
-@app.post("/cycle/start")
-def start_cycle(payload: StartCycleRequest):
-    controller = _auto_controller(payload.camera_id)
-    with controller.lock, _lifecycle_lock:
-        if controller.enabled:
-            raise HTTPException(status_code=409, detail="Mode Auto aktif; kontrol manual dikunci")
-        result, _ = _begin_cycle(payload)
-        return {"status": "ok", "cycle": result}
+class StartPayload(CapturePayload):
+    truck_code: str = "Siklus Tebu"
+    notes: str = ""
 
 
-def _begin_cycle(payload: StartCycleRequest, duration: Optional[float] = None, warm: bool = True):
-    if AIRepository.has_running_cycle(payload.camera_id):
-        raise HTTPException(status_code=409, detail="Masih ada siklus aktif pada kamera ini")
-    config = load_config()
-    # Load/warm the model before starting the one-second acquisition clock.
-    stream = stream_manager.get_stream(payload.camera_id)
-    image = stream.get_raw_frame() if stream else None
-    if image is None:
-        raise HTTPException(status_code=503, detail="CCTV is not connected")
-    if warm:
-        run_onnx_inference(image, config)
-    result = AIRepository.start_cycle(
-        camera_id=payload.camera_id,
-        model_version=config.version,
-        cycle_code=payload.cycle_code
-    )
-    cycle_code = result["cycle_code"]
-    cycle_id = result.get("id")
-    deadline = time.monotonic() + duration if duration is not None else None
-
-    # Ensure cycle snapshot subfolder exists
-    cycle_dir = SNAPSHOTS_DIR / cycle_code
-    cycle_dir.mkdir(parents=True, exist_ok=True)
-
-    # Start autonomous background scanner worker for this cycle
-    with _workers_lock:
-        if cycle_code in _active_cycle_workers:
-            _active_cycle_workers[cycle_code][0].set()
-        stop_event = threading.Event()
-        thread = threading.Thread(
-            target=_cycle_scan_worker,
-            args=(cycle_code, payload.camera_id, cycle_id, stop_event, deadline),
-            daemon=True,
-            name=f"cycle-scan-{cycle_code}"
-        )
-        _active_cycle_workers[cycle_code] = (stop_event, thread)
-        thread.start()
-
-    return result, deadline
-
-
-@app.post("/cycle/stop")
-def stop_cycle(payload: StopCycleRequest):
-    if payload.cycle_code in _automatic_cycle_codes:
-        raise HTTPException(status_code=409, detail="Siklus Auto dikendalikan oleh timer; matikan Auto untuk mengakhiri lebih awal")
-    return {"status": "ok", "cycle_result": _stop_cycle(payload.cycle_code)}
-
-
-def _stop_cycle(cycle_code: str):
-    with _workers_lock:
-        if cycle_code in _active_cycle_workers:
-            stop_event, thread = _active_cycle_workers[cycle_code]
-            stop_event.set()
-            thread.join(timeout=30.0)
-            if thread.is_alive():
-                raise HTTPException(status_code=503, detail="Capture is still finishing; retry stop")
-            del _active_cycle_workers[cycle_code]
-
-    result = AIRepository.stop_cycle(cycle_code)
-    if not result:
-        raise HTTPException(status_code=503, detail=f"Cycle {cycle_code} could not be finalized; retry stop")
-    return result
+class StopPayload(CapturePayload):
+    cycle_code: str
 
 
 @app.post("/infer")
-def infer(payload: InferRequest):
-    config = load_config()
-    image = None
-    captured_at = datetime.now(timezone.utc).isoformat()
-    snapshot_filename = f"capture_{uuid4().hex}.jpg"
-    
-    # Store snapshot in cycle folder if cycle_code is provided
-    if payload.cycle_code:
-        cycle_folder = SNAPSHOTS_DIR / payload.cycle_code
-        cycle_folder.mkdir(parents=True, exist_ok=True)
-        snapshot_path = cycle_folder / snapshot_filename
-        rel_snapshot_path = f"storage/snapshots/{payload.cycle_code}/{snapshot_filename}"
-    else:
-        snapshot_path = SNAPSHOTS_DIR / snapshot_filename
-        rel_snapshot_path = f"storage/snapshots/{snapshot_filename}"
+def infer(payload: CapturePayload, authorization: Optional[str] = Header(None)):
+    _authorize_auto(payload.camera_id, authorization, write=True)
+    runtime = controller(payload.camera_id)
+    try:
+        with runtime.lock:
+            if runtime.enabled or runtime.cycle_code:
+                raise HTTPException(409, "Kamera sedang digunakan oleh siklus")
+            return runtime.capture()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Capture gagal")
+        raise HTTPException(503, f"Kesalahan teknis capture: {exc}") from exc
 
-    if payload.camera_id:
-        stream = stream_manager.get_stream(payload.camera_id)
-        if stream:
-            all_rois = load_all_rois()
-            roi = all_rois.get(payload.camera_id)
-            if payload.crop_roi and roi and roi.enabled:
-                image = stream.get_roi_crop(roi)
-            else:
-                image = stream.get_raw_frame()
 
-    if image is None and payload.image_path:
-        img_p = Path(payload.image_path)
-        if not img_p.is_absolute():
-            img_p = ROOT / img_p
-        image = cv2.imread(str(img_p))
+@app.post("/cycle/start")
+def start_cycle(payload: StartPayload, authorization: Optional[str] = Header(None)):
+    _authorize_auto(payload.camera_id, authorization, write=True)
+    try:
+        code = controller(payload.camera_id).start(payload.truck_code, payload.notes)
+        return {"cycle_code": code}
+    except Exception as exc:
+        raise HTTPException(503, f"Kesalahan teknis siklus: {exc}") from exc
 
-    if image is None:
-        raise HTTPException(status_code=400, detail="No valid camera stream or image provided for inference")
 
-    classes, confidence = run_onnx_inference(image, config)
-    if not cv2.imwrite(str(snapshot_path), image):
-        raise HTTPException(status_code=500, detail="Gagal menyimpan snapshot")
-
-    mapped_scores, total_impurity, detected_class, impurity_measured = measurement_result(classes, config)
-    grade = detected_class
-
-    # Encode image bytes for optional DB BLOB storage
-    _, encoded_jpg = cv2.imencode(".jpg", image)
-    image_bytes = encoded_jpg.tobytes() if encoded_jpg is not None else None
-
-    # Save to sugarcane_ai database
-    result_id = AIRepository.save_inference_result(
-        camera_id=payload.camera_id or 0,
-        model_version=config.version,
-        snapshot_path=rel_snapshot_path,
-        classes_score=mapped_scores,
-        total_impurity=total_impurity,
-        detected_class=detected_class,
-        confidence=confidence,
-        image_blob=image_bytes,
-        cycle_id=payload.cycle_id,
-        cycle_code=payload.cycle_code,
-        captured_at=captured_at
-    )
-
-    if result_id is None:
-        snapshot_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=503, detail="Failed to persist detection in database")
-
-    return {
-        "id": result_id,
-        "timestamp": captured_at,
-        "camera_id": payload.camera_id,
-        "cycle_id": payload.cycle_id,
-        "cycle_code": payload.cycle_code,
-        "classes": mapped_scores,
-        "detected_class": detected_class,
-        "candidate_class": max(mapped_scores, key=mapped_scores.get) if config.type == "classification" else detected_class,
-        "prediction_accepted": detected_class != UNKNOWN_GRADE,
-        "confidence_threshold": config.threshold,
-        "detected_class_index": config.classes.index(detected_class) if detected_class in config.classes else None,
-        "model_sha256": model_fingerprint(config),
-        "below_confidence_threshold": confidence < config.threshold,
-        "grade": grade,
-        "total_impurity": total_impurity,
-        "impurity_measured": impurity_measured,
-        "confidence": confidence,
-        "score_kind": "classification_probability" if config.type == "classification" else "segmentation_area",
-        "similarity_percent": None,
-        "score_semantics": "Softmax classification confidence; not visual similarity, physical composition, or validated accuracy",
-        "similarity_unavailable_reason": "Tidak tersedia referensi visual berlabel untuk seluruh kelas dan validasi skor kemiripan independen",
-        "best_candidate": {
-            "category": max(mapped_scores, key=mapped_scores.get),
-            "score_percent": confidence * 100,
-            "score_kind": "classification_probability",
-            "accepted": detected_class != UNKNOWN_GRADE,
-        },
-        "compared_classes": config.classes,
-        "snapshot_path": rel_snapshot_path,
-    }
+@app.post("/cycle/stop")
+def stop_cycle(payload: StopPayload, authorization: Optional[str] = Header(None)):
+    _authorize_auto(payload.camera_id, authorization, write=True)
+    try:
+        controller(payload.camera_id).finish(payload.cycle_code)
+        return {"cycle_code": payload.cycle_code}
+    except Exception as exc:
+        raise HTTPException(503, f"Kesalahan teknis siklus: {exc}") from exc

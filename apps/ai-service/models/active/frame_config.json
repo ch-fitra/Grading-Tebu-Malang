@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "type": "classification",
   "input_size": 224,
-  "classes": ["full_frame_sugarcane", "not_full_frame"],
-  "threshold": 0.80,
-  "output_activation": "softmax",
+  "classes": [
+    "full_frame_sugarcane",
+    "not_full_frame"
+  ],
+  "threshold": 0.7,
+  "output_activation": "linear",
   "input_color": "rgb",
-  "model_path": "models/active/model_frame_sugarcane.keras",
-  "frame_input": "embedded_roi"
+  "model_path": "model_frame_sugarcane.keras"
 }

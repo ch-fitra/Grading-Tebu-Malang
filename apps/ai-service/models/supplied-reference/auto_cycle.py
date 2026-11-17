@@ -1,4 +1,4 @@
-"""Server-owned automatic cycles, using observations from the configured detection area."""
+"""Server-owned automatic cycles; no browser timers or ROI are involved."""
 from __future__ import annotations
 
 import math
@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 @dataclass
 class FrameGate:
-    confirm_seconds: float = 3.0
-    clear_seconds: float = 3.0
+    confirm_seconds: float = 1.0
+    clear_seconds: float = 2.0
     max_gap: float = 1.5
     waiting_clear: bool = False
     since: float | None = None
@@ -43,7 +43,7 @@ class FrameGate:
 
 
 class AutoCycleController:
-    def __init__(self, camera_id, sample, start, finish, duration=50.0, clock=time.monotonic):
+    def __init__(self, camera_id, sample, start, finish, duration=30.0, clock=time.monotonic):
         self.camera_id = camera_id
         self.sample = sample
         self.start_cycle = start

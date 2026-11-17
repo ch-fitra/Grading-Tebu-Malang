@@ -12,8 +12,6 @@ ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(ROOT / ".env", override=False)
 
 # Database Connection URLs
-if os.getenv("AUTO_CYCLE_API_URL") != "http://127.0.0.1:4111":
-    raise RuntimeError("AUTO_CYCLE_API_URL Malang harus http://127.0.0.1:4111")
 PRIMARY_DB_URL = os.environ["DATABASE_URL"]
 AI_DB_URL = os.environ["AI_DATABASE_URL"]
 from urllib.parse import urlparse

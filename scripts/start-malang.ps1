@@ -9,7 +9,7 @@ try { $startupLock = [IO.File]::Open((Join-Path $runtime 'startup.lock'), 'OpenO
 catch { throw 'Startup Malang lain sedang berjalan. Tunggu hingga selesai.' }
 try {
 if (Test-Path -LiteralPath $manifest) {
-    $oldRecords = @(Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json)
+    $oldRecords = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
     foreach ($record in $oldRecords) {
         if (Get-CimInstance Win32_Process -Filter "ProcessId=$($record.Id)") {
             throw "Manifest masih menunjuk PID hidup $($record.Id). Periksa identitas dan stop Malang sebelum start ulang."
@@ -61,11 +61,14 @@ function Wait-Malang($port, $process) {
     throw "Layanan Malang port $port belum siap; periksa $runtime"
 }
 try {
+    # Supply native OpenCV options before the Python process is created.
+    if (-not $env:OPENCV_FFMPEG_CAPTURE_OPTIONS) {
+        $previousEnv['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = [Environment]::GetEnvironmentVariable('OPENCV_FFMPEG_CAPTURE_OPTIONS', 'Process')
+        $env:OPENCV_FFMPEG_CAPTURE_OPTIONS = 'rtsp_transport;tcp|analyzeduration;1000000|probesize;32768'
+    }
     Write-Host '[preflight] Build dan pemeriksaan dependensi Python.'
-    $previousEnv['KERAS_BACKEND'] = [Environment]::GetEnvironmentVariable('KERAS_BACKEND', 'Process')
-    if (-not $env:KERAS_BACKEND) { $env:KERAS_BACKEND = 'torch' }
     if (-not $SkipBuild) { & npm.cmd run build; if ($LASTEXITCODE -ne 0) { throw 'Build gagal' } }
-    $probe = Start-Process -FilePath $Python -ArgumentList @('-c', '"import uvicorn, cv2, psycopg2, fastapi, keras, torch; print(keras.backend.backend())"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'python-check.log') -RedirectStandardError (Join-Path $runtime 'python-check-error.log')
+    $probe = Start-Process -FilePath $Python -ArgumentList @('-c', '"import uvicorn, cv2, psycopg2, fastapi"') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'python-check.log') -RedirectStandardError (Join-Path $runtime 'python-check-error.log')
     # Retain the native handle before waiting (Windows PowerShell 5.1).
     $probeHandle = $probe.Handle
     if (-not $probe.WaitForExit(120000)) { $probe.Kill(); throw "Pemeriksaan Python melewati 120 detik; periksa $runtime/python-check-error.log" }

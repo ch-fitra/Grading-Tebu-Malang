@@ -1,5 +1,5 @@
 import { usePanelSize } from "../hooks/usePanelSize";
-import { frameNumbers, dominantGrade, meanClassScores, frameGradeDistribution, storedClassProbability } from "../utils/grade-data";
+import { frameNumbers, newestFrame, frameGradeDistribution, storedClassProbability } from "../utils/grade-data";
 import { findStationCamera } from "../utils/stations";
 import { Clock, Camera, Radio, Activity, CheckCircle, ShieldCheck, ShieldAlert, Layers, X, Sliders, CameraOff, Lock, Maximize2, Minimize2, TrendingUp, BarChart3, Trash2, Sun, Moon, Play, Square, RotateCcw, ChevronDown, Truck, Check, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
@@ -213,7 +213,8 @@ export function DashboardPage() {
   autoCameraRef.current = targetCameraId;
   const currentAutoMode = autoMode?.camera_id === targetCameraId ? autoMode : null;
   const autoEnabled = currentAutoMode?.enabled === true;
-  const manualLocked = autoEnabled || autoModeBusy || !currentAutoMode || Boolean(autoModeError);
+  // Backend owns camera/Auto exclusion; stale polling must not disable manual controls.
+  const manualLocked = autoEnabled || autoModeBusy;
 
   useEffect(() => {
     setAutoMode(null);
@@ -545,43 +546,12 @@ export function DashboardPage() {
   // Tab mode for right panel: Realtime Cycle vs Daily Cross-Cycle Summary
   const [analysisTab, setAnalysisTab] = useState<"realtime" | "daily">("realtime");
 
-  // Effective inference for category analysis:
-  // 1. If currently running an active cycle: AVERAGE ALL FRAMES from the start of the active cycle!
-  // 2. If a specific cycle is filtered: AVERAGE ALL FRAMES belonging to that cycle!
-  // 3. When scanning has stopped, retain the aggregate for the selected camera/filter.
+  // Summary policy: the newest persisted snapshot, ordered by timestamp then ID.
   const effectiveInference = useMemo(() => {
-    if (activeCycle && activeCycleFrames.length === 0) return null;
-    if (activeCycle && activeCycleFrames.length > 0) {
-      const count = activeCycleFrames.length;
-      const avgConf = activeCycleFrames.reduce((s, c) => s + (c.confidence ?? 0), 0) / count;
-      return {
-        confidence: avgConf,
-        grade: dominantGrade(activeCycleFrames) ?? normalizeGrade(),
-        classScores: meanClassScores(activeCycleFrames),
-        id: activeCycleFrames[0]?.id || 0,
-        timestamp: activeCycle.startedAt,
-        cameraId: targetCameraId || 0,
-        snapshot: activeCycleFrames[0]?.snapshot || null,
-        isCumulativeCycle: true,
-        cycleFrameCount: count,
-      };
-    }
-
-    if (cycleModelFrames.length > 0) {
-      const count = cycleModelFrames.length;
-      return {
-        confidence: cycleModelFrames.reduce((sum, frame) => sum + frame.confidence, 0) / count,
-        grade: dominantGrade(cycleModelFrames) ?? normalizeGrade(),
-        classScores: meanClassScores(cycleModelFrames),
-        id: cycleModelFrames[0]?.id || 0,
-        timestamp: selectedCycle?.startedAt ?? cycleModelFrames[0].timestamp,
-        cameraId: targetCameraId || 0,
-        snapshot: cycleModelFrames[0]?.snapshot || null,
-        isCumulativeCycle: true,
-        cycleFrameCount: count,
-      };
-    }
-
+    const frames = activeCycle ? activeCycleFrames : cycleModelFrames;
+    const selected = newestFrame(frames);
+    if (selected) return { ...selected, isCumulativeCycle: false, cycleFrameCount: frames.length };
+    if (activeCycle || selectedCycle) return null;
     return latest?.cameraId === targetCameraId ? latest : null;
   }, [activeCycle, activeCycleFrames, selectedCycle, cycleModelFrames, latest, targetCameraId]);
 
@@ -590,7 +560,7 @@ export function DashboardPage() {
     const end = cycle.completedAt ? new Date(cycle.completedAt).getTime() : Date.now();
     const frames = analysisFrames.filter(item =>
       new Date(item.timestamp).getTime() >= start - 1000 && new Date(item.timestamp).getTime() <= end + 1000);
-    return dominantGrade(frames) ?? normalizeGrade();
+    return newestFrame(frames)?.grade ?? normalizeGrade();
   };
   // Agregasi Seluruh Siklus Meja Tebu untuk Stasiun / Pabrik ini
   const dailyCyclesStats = useMemo(() => {
@@ -608,7 +578,7 @@ export function DashboardPage() {
       ? cycles.reduce((acc, c) => acc + (c.averageConfidence ?? 0), 0) / cycles.length
       : 0.88;
 
-    const overallGrade = dominantGrade(cycles.map(c => ({ grade: cycleGrade(c) }))) ?? normalizeGrade();
+    const overallGrade = (cycles[0] ? cycleGrade(cycles[0]) : normalizeGrade());
 
     // Hitung distribusi kelas dari seluruh siklus
     const gradeCounts = GRADING_OUTCOMES.map((tg) => {
@@ -673,7 +643,6 @@ export function DashboardPage() {
   const confidence = effectiveInference?.confidence ?? 0;
   const grade = effectiveInference?.grade;
   const gradeConf = Math.min(1, Math.max(0, confidence ?? 0));
-  const confidenceThreshold = status?.ai.model?.confidence_threshold ?? 0.5;
   const isHistoryAggregate = !activeCycle && !selectedCycle && cycleModelFrames.length > 0;
 
 
@@ -749,7 +718,6 @@ export function DashboardPage() {
     };
   }, [lineCycles, activeLineHistory, targetCameraId, history]);
 
-  const isAiOnline = status?.ai.status === "ok";
   const cameraLive = targetCameraId ? status?.ai.cameras?.[String(targetCameraId)]?.live === true : false;
   const isDbOnline = status?.database.status === "ok" || status?.database.status === "dev-memory";
 
@@ -874,9 +842,9 @@ export function DashboardPage() {
           <div className="streamCard">
             <div className="streamCardHeader">
               <div className="streamCardTitle">
-                <div className={`streamLivePill ${targetCameraId && isStreaming ? "live" : "offline"}`}>
-                  <Radio size={9} className={targetCameraId && isStreaming ? "pulse-dot" : ""} />
-                  {targetCameraId && isStreaming ? "LIVE STREAM" : "NO SIGNAL"}
+                <div className={`streamLivePill ${cameraLive && isStreaming ? "live" : "offline"}`}>
+                  <Radio size={9} className={cameraLive && isStreaming ? "pulse-dot" : ""} />
+                  {cameraLive && isStreaming ? "LIVE STREAM" : "NO SIGNAL"}
                 </div>
                 <span className="streamCardSubtitle">MBS {activeLine}</span>
               </div>
@@ -895,7 +863,7 @@ export function DashboardPage() {
                       type="button"
                       className={`stStreamBtn captureBtn ${captureFeedback ? "success" : ""}`}
                       onClick={handleManualCapture}
-                      disabled={capturing || !canInspect || Boolean(activeCycle) || !status?.ai.model?.available}
+                      disabled={capturing || !canInspect || manualLocked || Boolean(activeCycle)}
                       title="AI Capture"
                     >
                       <Camera size={12} />
@@ -1048,7 +1016,7 @@ export function DashboardPage() {
                         </button>
                       ) : (
                         <button type="button" className="startCycleBtn" onClick={handleStartCycle}
-                          disabled={!canInspect || !targetCameraId || !isStreaming || manualLocked}
+                          disabled={!canInspect || !targetCameraId || manualLocked}
                           title={autoEnabled ? "Mode Auto aktif; tombol manual dikunci" : "Mulai deteksi siklus saat tebu diletakkan ke meja tebu"}>
                           <Play size={13} fill="currentColor" />
                           <span>Mulai Manual</span>
@@ -1092,7 +1060,7 @@ export function DashboardPage() {
               <div className="telItem">
                 <span className="telLabel">AI MODEL</span>
                 <strong className={status?.ai.model?.available ? "telGreen" : "telMuted"}>
-                  {!status ? "UNKNOWN" : status.ai.model?.available ? "ACTIVE" : isAiOnline ? "UNAVAILABLE" : "OFFLINE"}
+                  {status?.ai.model?.available ? "Model grading resmi siap" : "Model grading tidak tersedia"}
                 </strong>
               </div>
               <div className="telItem">
@@ -1115,8 +1083,8 @@ export function DashboardPage() {
             <div className="eventFeedHeader">
               <div className="eventFeedTitle">
                 <span className="eventFeedTitleBadge">
-                  <Radio size={10} className={eventTotal ? "pulse-dot" : ""} />
-                  <span>{selectedCycle ? `Siklus: ${selectedCycle.truckCode}` : "Live Detection Event Stream"}</span>
+                  <Radio size={10} className={cameraLive && activeCycle ? "pulse-dot" : ""} />
+                  <span>{selectedCycle ? `Siklus: ${selectedCycle.truckCode}` : "Riwayat Deteksi"}</span>
                 </span>
                 <span className="eventFeedCountBadge">{eventTotal?.toLocaleString("id-ID") ?? "—"}</span>
               </div>
@@ -1132,8 +1100,8 @@ export function DashboardPage() {
                     <span>Realtime</span>
                   </button>
                 ) : (
-                  <span className={`eventFeedStatus ${eventTotal && !detectionError ? "active" : "idle"}`}>
-                    {detectionError ? "TERPUTUS" : !currentDetectionPage ? "MEMUAT" : eventTotal ? "STREAM LIVE" : "IDLE"}
+                  <span className={`eventFeedStatus ${cameraLive && activeCycle && !detectionError ? "active" : "idle"}`}>
+                    {detectionError ? "TERPUTUS" : !currentDetectionPage ? "MEMUAT" : cameraLive && activeCycle ? "SIKLUS AKTIF" : eventTotal ? "RIWAYAT" : "IDLE"}
                   </span>
                 )}
               </div>
@@ -1539,7 +1507,7 @@ export function DashboardPage() {
                         {new Date(item.timestamp).toLocaleTimeString("id-ID", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
                       <span className="photoConf">
-                        Conf: {Math.round(item.confidence * 100)}%{confidenceThreshold !== undefined && item.confidence < confidenceThreshold ? " (rendah)" : ""}
+                        Conf: {Math.round(item.confidence * 100)}%
                       </span>
                     </div>
                   </button>
@@ -1615,7 +1583,7 @@ export function DashboardPage() {
                     </strong>
                   </div>
                   <div className="catKpi">
-                    <span className="catKpiLabel">{isHistoryAggregate ? "Rerata Confidence Riwayat" : effectiveInference && "cycleFrameCount" in effectiveInference ? "Rerata Confidence Siklus" : "AI Confidence"}</span>
+                    <span className="catKpiLabel">Probabilitas Snapshot</span>
                     <strong className="catKpiValue blue">
                       {hasLatestInference ? `${(gradeConf * 100).toFixed(1)}` : "—"}
                       <span className="catKpiUnit">%</span>
@@ -1639,13 +1607,13 @@ export function DashboardPage() {
                   <div className="catGradeInfo">
                     <span className="catGradeLabel">
                       <Activity size={10} />
-                      <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `${isHistoryAggregate ? "DOMINAN RIWAYAT" : "DOMINAN"} (${effectiveInference.cycleFrameCount} FRAME)` : "KANDIDAT MODEL"}</span>
+                      <span>{effectiveInference && "cycleFrameCount" in effectiveInference ? `${isHistoryAggregate ? "SNAPSHOT TERBARU RIWAYAT" : "SNAPSHOT TERBARU"} (${effectiveInference.cycleFrameCount} FRAME)` : hasLatestInference ? "HASIL SNAPSHOT" : "Belum ada capture"}</span>
                     </span>
                     <div className={`catGradeValue grade-${normalizeGrade(grade).toLowerCase()}`}>
                       {hasLatestInference ? normalizeGrade(grade) : "—"}
                     </div>
                     <span className="catGradeSub">
-                      {hasLatestInference ? (KEBONAGUNG_GRADES.find(tg => tg.code === normalizeGrade(grade))?.decision || "—") : "Menunggu pemindaian AI..."}
+                      {hasLatestInference ? (KEBONAGUNG_GRADES.find(tg => tg.code === normalizeGrade(grade))?.decision || "—") : "Belum ada capture"}
                     </span>
                   </div>
                 </div>

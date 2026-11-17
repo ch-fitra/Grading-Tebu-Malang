@@ -16,8 +16,7 @@
     "Tebu Muda",
     "Terbakar"
   ],
-  "threshold": 0.5,
-  "output_activation": "softmax",
+  "output_activation": "linear",
   "input_color": "rgb",
-  "model_path": "apps/ai-service/models/active/model_sugarcane_malang.keras"
+  "model_path": "model_sugarcane_malang.keras"
 }

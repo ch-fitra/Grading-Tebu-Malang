@@ -1,4 +1,4 @@
-// Grading classes are validated against the active Malang model configuration.
+// Stored historical grades and percentages; no grading engine is configured.
 export type Grade = string;
 
 export type ClassPercentages = {
